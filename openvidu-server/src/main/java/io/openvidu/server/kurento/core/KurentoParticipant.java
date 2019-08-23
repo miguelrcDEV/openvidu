@@ -53,6 +53,7 @@ import io.openvidu.server.kurento.endpoint.PublisherEndpoint;
 import io.openvidu.server.kurento.endpoint.SdpType;
 import io.openvidu.server.kurento.endpoint.SubscriberEndpoint;
 import io.openvidu.server.recording.service.RecordingManager;
+import io.openvidu.server.streaming.StreamingManager;
 
 public class KurentoParticipant extends Participant {
 
@@ -184,6 +185,14 @@ public class KurentoParticipant extends Participant {
 		log.trace("PARTICIPANT {}: Publishing Sdp ({}) is {}", this.getParticipantPublicId(), sdpType, sdpResponse);
 		log.info("PARTICIPANT {}: Is now publishing video in room {}", this.getParticipantPublicId(),
 				this.session.getSessionId());
+
+        try {
+            StreamingManager streamingManager = new StreamingManager();
+            streamingManager.startStreamToWowza(this.session, this);
+        } catch (Exception e) {
+            //TODO: handle exception
+            log.error("[STREAMING] - Error sending streaming: {}, e");
+        }
 
 		if (this.openviduConfig.isRecordingModuleEnabled()
 				&& this.recordingManager.sessionIsBeingRecorded(session.getSessionId())) {

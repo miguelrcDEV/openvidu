@@ -26,6 +26,9 @@ import org.kurento.client.ErrorEvent;
 import org.kurento.client.EventListener;
 import org.kurento.client.IceCandidate;
 import org.kurento.client.MediaPipeline;
+import org.kurento.client.Composite;
+import org.kurento.client.HubPort;
+import org.kurento.client.RtpEndpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,6 +62,12 @@ public class KurentoSession extends Session {
 	private Object pipelineCreateLock = new Object();
 	private Object pipelineReleaseLock = new Object();
 	private boolean destroyKurentoClient;
+
+    private Composite composite;
+    private ConcurrentHashMap<String, HubPort> hPorts = new ConcurrentHashMap<String, HubPort>();
+    private HubPort hubPortOut;
+	private Integer wowzaPort;
+	private RtpEndpoint wowzaEndpoint;
 
 	public final ConcurrentHashMap<String, String> publishedStreamIds = new ConcurrentHashMap<>();
 
@@ -334,6 +343,42 @@ public class KurentoSession extends Session {
 				log.error("Error waiting to new MediaPipeline on KurentoSession restart: {}", e.getMessage());
 			}
 		});
+	}
+
+    public Composite getComposite() {
+		return this.composite;
+	}
+
+	public void setComposite(Composite composite) {
+		this.composite = composite;
+	}
+
+    public ConcurrentHashMap<String, HubPort> gethPorts() {
+		return this.hPorts;
+	}
+
+	public void sethPorts(ConcurrentHashMap<String, HubPort> hPorts) {
+		this.hPorts = hPorts;
+	}
+
+    public HubPort getHubPortOut() {
+		return this.hubPortOut;
+	}
+
+	public void setHubPortOut(HubPort hubPortOut) {
+		this.hubPortOut = hubPortOut;
+	}
+
+    public void setWowzaEndpoint(RtpEndpoint endpoint){
+		this.wowzaEndpoint = endpoint;
+	}
+		
+	public void setWowzaPort(Integer port){
+		this.wowzaPort = port;
+	}
+		
+	public RtpEndpoint getWowzaEndpoint(){
+		return this.wowzaEndpoint;
 	}
 
 }
