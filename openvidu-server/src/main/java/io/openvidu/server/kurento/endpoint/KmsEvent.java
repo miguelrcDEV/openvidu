@@ -17,20 +17,52 @@
 
 package io.openvidu.server.kurento.endpoint;
 
-import org.kurento.client.MediaEvent;
+import org.kurento.client.RaiseBaseEvent;
+import org.kurento.jsonrpc.JsonUtils;
+
+import com.google.gson.JsonObject;
+
+import io.openvidu.server.core.Participant;
 
 public class KmsEvent {
 
 	long timestamp;
 	long msSinceCreation;
+	Participant participant;
 	String endpoint;
-	MediaEvent event;
+	RaiseBaseEvent event;
 
-	public KmsEvent(MediaEvent event, long createdAt) {
+	public KmsEvent(RaiseBaseEvent event, Participant participant, String endpointName, long createdAt) {
 		this.event = event;
-		this.endpoint = event.getSource().getName();
-		this.event.setSource(null);
-		this.timestamp = System.currentTimeMillis();
+		this.participant = participant;
+		this.endpoint = endpointName;
+		this.timestamp = Long.parseLong(event.getTimestampMillis());
 		this.msSinceCreation = this.timestamp - createdAt;
+
+		this.removeSourceForJsonCompatibility();
 	}
+
+	public JsonObject toJson() {
+		JsonObject json = JsonUtils.toJsonObject(event);
+		json.remove("tags");
+		json.remove("timestampMillis");
+		json.addProperty("timestamp", timestamp);
+		json.addProperty("session", participant.getSessionId());
+		json.addProperty("user", participant.getFinalUserId());
+		json.addProperty("connection", participant.getParticipantPublicId());
+		json.addProperty("endpoint", this.endpoint);
+		json.addProperty("msSinceEndpointCreation", msSinceCreation);
+		return json;
+	}
+
+	public long getTimestamp() {
+		return this.timestamp;
+	}
+
+	private void removeSourceForJsonCompatibility() {
+		// This avoids stack overflow error when transforming RaiseBaseEvent into
+		// JsonObject
+		this.event.setSource(null);
+	}
+
 }

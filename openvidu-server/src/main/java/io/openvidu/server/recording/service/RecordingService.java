@@ -26,9 +26,12 @@ import io.openvidu.client.OpenViduException;
 import io.openvidu.client.OpenViduException.Code;
 import io.openvidu.java.client.RecordingLayout;
 import io.openvidu.java.client.RecordingProperties;
+import io.openvidu.server.cdr.CallDetailRecord;
 import io.openvidu.server.config.OpenviduConfig;
+import io.openvidu.server.core.EndReason;
 import io.openvidu.server.core.Session;
 import io.openvidu.server.recording.Recording;
+import io.openvidu.server.recording.RecordingDownloader;
 import io.openvidu.server.utils.CommandExecutor;
 import io.openvidu.server.utils.CustomFileManager;
 
@@ -38,16 +41,21 @@ public abstract class RecordingService {
 
 	protected OpenviduConfig openviduConfig;
 	protected RecordingManager recordingManager;
+	protected RecordingDownloader recordingDownloader;
+	protected CallDetailRecord cdr;
 	protected CustomFileManager fileWriter = new CustomFileManager();
 
-	RecordingService(RecordingManager recordingManager, OpenviduConfig openviduConfig) {
+	RecordingService(RecordingManager recordingManager, RecordingDownloader recordingDownloader,
+			OpenviduConfig openviduConfig, CallDetailRecord cdr) {
 		this.recordingManager = recordingManager;
+		this.recordingDownloader = recordingDownloader;
 		this.openviduConfig = openviduConfig;
+		this.cdr = cdr;
 	}
 
 	public abstract Recording startRecording(Session session, RecordingProperties properties) throws OpenViduException;
 
-	public abstract Recording stopRecording(Session session, Recording recording, String reason);
+	public abstract Recording stopRecording(Session session, Recording recording, EndReason reason);
 
 	/**
 	 * Generates metadata recording file (".recording.RECORDING_ID" JSON file to
@@ -58,8 +66,8 @@ public abstract class RecordingService {
 		boolean newFolderCreated = this.fileWriter.createFolderIfNotExists(folder);
 
 		if (newFolderCreated) {
-			log.info(
-					"New folder {} created. This means the recording started for a session with no publishers or no media type compatible publishers",
+			log.warn(
+					"New folder {} created. This means A) Cluster mode is enabled B) The recording started for a session with no publishers or C) No media type compatible publishers",
 					folder);
 		} else {
 			log.info("Folder {} already existed. Some publisher is already being recorded", folder);
@@ -73,42 +81,49 @@ public abstract class RecordingService {
 	}
 
 	/**
-	 * Update and overwrites metadata recording file with final values on recording
-	 * stop (".recording.RECORDING_ID" JSON file to store Recording entity).
+	 * Update and overwrites metadata recording file to set it in "stopped" status.
+	 * Recording size and duration will remain as 0
 	 * 
 	 * @return updated Recording object
 	 */
-	protected Recording sealRecordingMetadataFile(Recording recording, long size, double duration,
+	protected Recording sealRecordingMetadataFileAsStopped(Recording recording) {
+		final String entityFile = this.openviduConfig.getOpenViduRecordingPath() + recording.getId() + "/"
+				+ RecordingManager.RECORDING_ENTITY_FILE + recording.getId();
+		return this.sealRecordingMetadataFile(recording, 0, 0, io.openvidu.java.client.Recording.Status.stopped,
+				entityFile);
+	}
+
+	/**
+	 * Update and overwrites metadata recording file to set it in "ready" (or
+	 * "failed") status
+	 * 
+	 * @return updated Recording object
+	 */
+	protected Recording sealRecordingMetadataFileAsReady(Recording recording, long size, double duration,
 			String metadataFilePath) {
+		io.openvidu.java.client.Recording.Status status = io.openvidu.java.client.Recording.Status.failed
+				.equals(recording.getStatus()) ? io.openvidu.java.client.Recording.Status.failed
+						: io.openvidu.java.client.Recording.Status.ready;
+		
+		// Status is now failed or ready. Url property must be defined
+		recording.setUrl(recordingManager.getRecordingUrl(recording));
+
+		final String entityFile = this.openviduConfig.getOpenViduRecordingPath() + recording.getId() + "/"
+				+ RecordingManager.RECORDING_ENTITY_FILE + recording.getId();
+		return this.sealRecordingMetadataFile(recording, size, duration, status, entityFile);
+	}
+
+	private Recording sealRecordingMetadataFile(Recording recording, long size, double duration,
+			io.openvidu.java.client.Recording.Status status, String metadataFilePath) {
+		recording.setStatus(status);
 		recording.setSize(size); // Size in bytes
 		recording.setDuration(duration > 0 ? duration : 0); // Duration in seconds
-		if (!io.openvidu.java.client.Recording.Status.failed.equals(recording.getStatus())) {
-			recording.setStatus(io.openvidu.java.client.Recording.Status.stopped);
-		}
-		this.fileWriter.overwriteFile(metadataFilePath, recording.toJson().toString());
-		recording = this.recordingManager.updateRecordingUrl(recording);
 
-		log.info("Sealed recording metadata file at {}", metadataFilePath);
+		if (this.fileWriter.overwriteFile(metadataFilePath, recording.toJson().toString())) {
+			log.info("Sealed recording metadata file at {} with status [{}]", metadataFilePath, status.name());
+		}
 
 		return recording;
-	}
-
-	/**
-	 * Changes recording from starting to started, updates global recording
-	 * collections and sends RPC response to clients
-	 */
-	protected void updateRecordingManagerCollections(Session session, Recording recording) {
-		this.recordingManager.sessionHandler.setRecordingStarted(session.getSessionId(), recording);
-		this.recordingManager.sessionsRecordings.put(session.getSessionId(), recording);
-		this.recordingManager.startingRecordings.remove(recording.getId());
-		this.recordingManager.startedRecordings.put(recording.getId(), recording);
-	}
-
-	/**
-	 * Sends RPC response for recording started event
-	 */
-	protected void sendRecordingStartedNotification(Session session, Recording recording) {
-		this.recordingManager.getSessionEventsHandler().sendRecordingStartedNotification(session, recording);
 	}
 
 	/**
@@ -145,12 +160,12 @@ public abstract class RecordingService {
 		try {
 			String response = CommandExecutor.execCommand("/bin/sh", "-c", command);
 			if ("".equals(response)) {
-				log.info("Individual recording file permissions successfully updated");
+				log.info("KMS recording file permissions successfully updated");
 			} else {
-				log.error("Individual recording file permissions failed to update: {}", response);
+				log.error("KMS recording file permissions failed to update: {}", response);
 			}
 		} catch (IOException | InterruptedException e) {
-			log.error("Individual recording file permissions failed to update. Error: {}", e.getMessage());
+			log.error("KMS recording file permissions failed to update. Error: {}", e.getMessage());
 		}
 	}
 

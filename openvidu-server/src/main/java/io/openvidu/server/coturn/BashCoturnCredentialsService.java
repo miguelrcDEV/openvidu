@@ -20,9 +20,10 @@ package io.openvidu.server.coturn;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 
+import javax.annotation.PostConstruct;
+
 import org.apache.commons.lang3.RandomStringUtils;
 
-import io.openvidu.server.config.OpenviduConfig;
 import io.openvidu.server.utils.CommandExecutor;
 
 public class BashCoturnCredentialsService extends CoturnCredentialsService {
@@ -31,18 +32,18 @@ public class BashCoturnCredentialsService extends CoturnCredentialsService {
 	private AtomicLong logCounter = new AtomicLong(0);
 	private final long LOG_LIMIT = 30;
 
-	public BashCoturnCredentialsService(OpenviduConfig openviduConfig) {
-		super(openviduConfig);
+	@PostConstruct
+	private void initialize() {
 		try {
 			String response = CommandExecutor.execCommand("/bin/sh", "-c",
 					"turnadmin -l -N " + this.coturnDatabaseString);
 			if (response.contains("turnadmin: not found")) {
 				// No coturn installed in the host machine
 				log.warn("No COTURN server is installed in the host machine. Response: " + response);
-				log.warn("No COTURN server will be automatically configured for clients");
+				log.error("No COTURN server will be automatically configured for clients");
 			} else if (response.contains("Cannot initialize Redis DB connection")) {
 				log.warn("Redis DB is not accesible with connection string " + this.coturnDatabaseString);
-				log.warn("No COTURN server will be automatically configured for clients");
+				log.error("No COTURN server will be automatically configured for clients");
 			} else {
 				log.info("COTURN Redis DB accessible with string " + this.coturnDatabaseString);
 				log.info("Cleaning COTURN DB...");

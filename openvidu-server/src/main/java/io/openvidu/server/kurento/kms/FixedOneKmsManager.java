@@ -17,43 +17,33 @@
 
 package io.openvidu.server.kurento.kms;
 
+import java.util.Arrays;
+import java.util.List;
+
 import org.kurento.client.KurentoClient;
-import org.kurento.client.KurentoConnectionListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.kurento.commons.exception.KurentoException;
 
 public class FixedOneKmsManager extends KmsManager {
 
-	private static final Logger log = LoggerFactory.getLogger(FixedOneKmsManager.class);
-
-	public FixedOneKmsManager(String kmsWsUri) {
-		this(kmsWsUri, 1);
-	}
-
-	public FixedOneKmsManager(String kmsWsUri, int numKmss) {
-		for (int i = 0; i < numKmss; i++) {
-			this.addKms(new Kms(KurentoClient.create(kmsWsUri, new KurentoConnectionListener() {
-
-				@Override
-				public void reconnected(boolean isReconnected) {
-					log.warn("Kurento Client reconnected ({}) to KMS with uri {}", isReconnected, kmsWsUri);
-				}
-
-				@Override
-				public void disconnected() {
-					log.warn("Kurento Client disconnected from KMS with uri {}", kmsWsUri);
-				}
-
-				@Override
-				public void connectionFailed() {
-					log.warn("Kurento Client failed connecting to KMS with uri {}", kmsWsUri);
-				}
-
-				@Override
-				public void connected() {
-					log.warn("Kurento Client is now connected to KMS with uri {}", kmsWsUri);
-				}
-			}), kmsWsUri));
+	@Override
+	public List<Kms> initializeKurentoClients(List<String> kmsUris, boolean disconnectUponFailure) throws Exception {
+		final String kmsUri = kmsUris.get(0);
+		KurentoClient kClient = null;
+		Kms kms = new Kms(kmsUri, loadManager);
+		this.addKms(kms);
+		try {
+			kClient = KurentoClient.create(kmsUri, this.generateKurentoConnectionListener(kms.getId()));
+		} catch (KurentoException e) {
+			log.error("KMS in {} is not reachable by OpenVidu Server", kmsUri);
+			if (kClient != null) {
+				kClient.destroy();
+			}
+			throw new Exception();
 		}
+
+		kms.setKurentoClient(kClient);
+
+		return Arrays.asList(kms);
 	}
+
 }

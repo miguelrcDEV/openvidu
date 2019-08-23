@@ -36,11 +36,12 @@ import com.google.gson.JsonObject;
 import io.openvidu.client.OpenViduException;
 import io.openvidu.client.OpenViduException.Code;
 import io.openvidu.client.internal.ProtocolElements;
+import io.openvidu.java.client.OpenViduRole;
 import io.openvidu.server.cdr.CallDetailRecord;
 import io.openvidu.server.config.InfoHandler;
 import io.openvidu.server.config.OpenviduConfig;
-import io.openvidu.server.kurento.KurentoFilter;
 import io.openvidu.server.kurento.core.KurentoParticipant;
+import io.openvidu.server.kurento.endpoint.KurentoFilter;
 import io.openvidu.server.recording.Recording;
 import io.openvidu.server.rpc.RpcNotificationService;
 
@@ -68,7 +69,7 @@ public class SessionEventsHandler {
 		CDR.recordSessionCreated(session);
 	}
 
-	public void onSessionClosed(String sessionId, String reason) {
+	public void onSessionClosed(String sessionId, EndReason reason) {
 		CDR.recordSessionDestroyed(sessionId, reason);
 	}
 
@@ -160,7 +161,7 @@ public class SessionEventsHandler {
 	}
 
 	public void onParticipantLeft(Participant participant, String sessionId, Set<Participant> remainingParticipants,
-			Integer transactionId, OpenViduException error, String reason) {
+			Integer transactionId, OpenViduException error, EndReason reason) {
 		if (error != null) {
 			rpcNotificationService.sendErrorResponse(participant.getParticipantPrivateId(), transactionId, null, error);
 			return;
@@ -173,7 +174,7 @@ public class SessionEventsHandler {
 
 		JsonObject params = new JsonObject();
 		params.addProperty(ProtocolElements.PARTICIPANTLEFT_NAME_PARAM, participant.getParticipantPublicId());
-		params.addProperty(ProtocolElements.PARTICIPANTLEFT_REASON_PARAM, reason);
+		params.addProperty(ProtocolElements.PARTICIPANTLEFT_REASON_PARAM, reason != null ? reason.name() : "");
 
 		for (Participant p : remainingParticipants) {
 			rpcNotificationService.sendNotification(p.getParticipantPrivateId(),
@@ -184,6 +185,10 @@ public class SessionEventsHandler {
 			// No response when the participant is forcibly evicted instead of voluntarily
 			// leaving the session
 			rpcNotificationService.sendResponse(participant.getParticipantPrivateId(), transactionId, new JsonObject());
+		}
+
+		if (!ProtocolElements.RECORDER_PARTICIPANT_PUBLICID.equals(participant.getParticipantPublicId())) {
+			CDR.recordParticipantLeft(participant, sessionId, reason);
 		}
 	}
 
@@ -231,7 +236,7 @@ public class SessionEventsHandler {
 	}
 
 	public void onUnpublishMedia(Participant participant, Set<Participant> participants, Participant moderator,
-			Integer transactionId, OpenViduException error, String reason) {
+			Integer transactionId, OpenViduException error, EndReason reason) {
 		boolean isRpcFromModerator = transactionId != null && moderator != null;
 		boolean isRpcFromOwner = transactionId != null && moderator == null;
 
@@ -246,7 +251,7 @@ public class SessionEventsHandler {
 
 		JsonObject params = new JsonObject();
 		params.addProperty(ProtocolElements.PARTICIPANTUNPUBLISHED_NAME_PARAM, participant.getParticipantPublicId());
-		params.addProperty(ProtocolElements.PARTICIPANTUNPUBLISHED_REASON_PARAM, reason);
+		params.addProperty(ProtocolElements.PARTICIPANTUNPUBLISHED_REASON_PARAM, reason != null ? reason.name() : "");
 
 		for (Participant p : participants) {
 			if (p.getParticipantPrivateId().equals(participant.getParticipantPrivateId())) {
@@ -386,7 +391,7 @@ public class SessionEventsHandler {
 	}
 
 	public void onForceDisconnect(Participant moderator, Participant evictedParticipant, Set<Participant> participants,
-			Integer transactionId, OpenViduException error, String reason) {
+			Integer transactionId, OpenViduException error, EndReason reason) {
 
 		boolean isRpcCall = transactionId != null;
 		if (isRpcCall) {
@@ -401,7 +406,7 @@ public class SessionEventsHandler {
 		JsonObject params = new JsonObject();
 		params.addProperty(ProtocolElements.PARTICIPANTEVICTED_CONNECTIONID_PARAM,
 				evictedParticipant.getParticipantPublicId());
-		params.addProperty(ProtocolElements.PARTICIPANTEVICTED_REASON_PARAM, reason);
+		params.addProperty(ProtocolElements.PARTICIPANTEVICTED_REASON_PARAM, reason != null ? reason.name() : "");
 
 		if (!ProtocolElements.RECORDER_PARTICIPANT_PUBLICID.equals(evictedParticipant.getParticipantPublicId())) {
 			// Do not send a message when evicting RECORDER participant
@@ -418,8 +423,6 @@ public class SessionEventsHandler {
 
 	public void sendRecordingStartedNotification(Session session, Recording recording) {
 
-		CDR.recordRecordingStarted(session.getSessionId(), recording);
-
 		// Filter participants by roles according to "openvidu.recording.notification"
 		Set<Participant> filteredParticipants = this.filterParticipantsByRole(
 				this.openviduConfig.getRolesFromRecordingNotification(), session.getParticipants());
@@ -434,9 +437,7 @@ public class SessionEventsHandler {
 		}
 	}
 
-	public void sendRecordingStoppedNotification(Session session, Recording recording, String reason) {
-
-		CDR.recordRecordingStopped(session.getSessionId(), recording, reason);
+	public void sendRecordingStoppedNotification(Session session, Recording recording, EndReason reason) {
 
 		// Be sure to clean this map (this should return null)
 		this.recordingsStarted.remove(session.getSessionId());
@@ -457,6 +458,7 @@ public class SessionEventsHandler {
 		JsonObject params = new JsonObject();
 		params.addProperty(ProtocolElements.RECORDINGSTOPPED_ID_PARAM, recording.getId());
 		params.addProperty(ProtocolElements.RECORDINGSTARTED_NAME_PARAM, recording.getName());
+		params.addProperty(ProtocolElements.RECORDINGSTOPPED_REASON_PARAM, reason != null ? reason.name() : "");
 
 		for (Participant p : filteredParticipants) {
 			rpcNotificationService.sendNotification(p.getParticipantPrivateId(),
@@ -466,7 +468,7 @@ public class SessionEventsHandler {
 
 	public void onFilterChanged(Participant participant, Participant moderator, Integer transactionId,
 			Set<Participant> participants, String streamId, KurentoFilter filter, OpenViduException error,
-			String reason) {
+			String filterReason) {
 		boolean isRpcFromModerator = transactionId != null && moderator != null;
 
 		if (isRpcFromModerator) {
@@ -494,7 +496,7 @@ public class SessionEventsHandler {
 			}
 		}
 		params.add(ProtocolElements.STREAMPROPERTYCHANGED_NEWVALUE_PARAM, filterJson);
-		params.addProperty(ProtocolElements.STREAMPROPERTYCHANGED_REASON_PARAM, reason);
+		params.addProperty(ProtocolElements.STREAMPROPERTYCHANGED_REASON_PARAM, filterReason);
 
 		for (Participant p : participants) {
 			if (p.getParticipantPrivateId().equals(participant.getParticipantPrivateId())) {
@@ -548,17 +550,13 @@ public class SessionEventsHandler {
 		this.recordingsStarted.put(sessionId, recording);
 	}
 
-	public InfoHandler getInfoHandler() {
-		return this.infoHandler;
-	}
-
-	private Set<Participant> filterParticipantsByRole(ParticipantRole[] roles, Set<Participant> participants) {
+	private Set<Participant> filterParticipantsByRole(OpenViduRole[] roles, Set<Participant> participants) {
 		return participants.stream().filter(part -> {
 			if (ProtocolElements.RECORDER_PARTICIPANT_PUBLICID.equals(part.getParticipantPublicId())) {
 				return false;
 			}
 			boolean isRole = false;
-			for (ParticipantRole role : roles) {
+			for (OpenViduRole role : roles) {
 				isRole = role.equals(part.getToken().getRole());
 				if (isRole)
 					break;

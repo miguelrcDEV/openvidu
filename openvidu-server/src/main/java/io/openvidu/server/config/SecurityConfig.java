@@ -50,9 +50,11 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 				.antMatchers(HttpMethod.POST, "/api/recordings/start").authenticated()
 				.antMatchers(HttpMethod.POST, "/api/recordings/stop").authenticated()
 				.antMatchers(HttpMethod.DELETE, "/api/recordings/**").authenticated()
-				// /api/config
+				// /config
 				.antMatchers(HttpMethod.GET, "/config/openvidu-publicurl").permitAll()
 				.antMatchers(HttpMethod.GET, "/config/**").authenticated()
+				// /cdr
+				.antMatchers(HttpMethod.GET, "/cdr/**").authenticated()
 				// Dashboard
 				.antMatchers("/").authenticated();
 
@@ -61,9 +63,9 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 
 		// Security for recorded videos
 		if (openviduConf.getOpenViduRecordingPublicAccess()) {
-			conf = conf.antMatchers("/recordings/*").permitAll();
+			conf = conf.antMatchers("/recordings/**").permitAll();
 		} else {
-			conf = conf.antMatchers("/recordings/*").authenticated();
+			conf = conf.antMatchers("/recordings/**").authenticated();
 		}
 
 		conf.and().httpBasic();
@@ -71,7 +73,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 
 	@Autowired
 	public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
-		auth.inMemoryAuthentication().withUser("OPENVIDUAPP").password(openviduConf.getOpenViduSecret()).roles("ADMIN");
+		auth.inMemoryAuthentication().withUser("OPENVIDUAPP").password("{noop}" + openviduConf.getOpenViduSecret())
+				.roles("ADMIN");
 	}
 
 }

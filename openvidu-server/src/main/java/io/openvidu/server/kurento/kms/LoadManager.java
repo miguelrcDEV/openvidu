@@ -19,8 +19,8 @@ package io.openvidu.server.kurento.kms;
 
 public interface LoadManager {
 
-  double calculateLoad(Kms kms);
+	public int calculateLoad(Kms kms);
 
-  boolean allowMoreElements(Kms kms);
+	// public boolean allowMoreElements(Kms kms);
 
 }

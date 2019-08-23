@@ -20,22 +20,24 @@ package io.openvidu.server.cdr;
 import com.google.gson.JsonObject;
 
 import io.openvidu.java.client.RecordingLayout;
+import io.openvidu.server.core.EndReason;
 import io.openvidu.server.recording.Recording;
 
 public class CDREventRecording extends CDREventEnd {
 
-	private Recording recording;
+	protected Recording recording;
 
 	// recordingStarted
-	public CDREventRecording(String sessionId, Recording recording) {
-		super(CDREventName.recordingStarted, sessionId, recording.getCreatedAt());
+	public CDREventRecording(Recording recording) {
+		super(CDREventName.recordingStarted, recording.getSessionId(), recording.getCreatedAt());
 		this.recording = recording;
 	}
 
 	// recordingStopped
-	public CDREventRecording(CDREvent event, String reason) {
-		super(CDREventName.recordingStopped, event.getSessionId(), event.getTimestamp(), reason);
-		this.recording = ((CDREventRecording) event).recording;
+	public CDREventRecording(CDREventRecording event, Recording recording, EndReason reason, Long timestamp) {
+		super(CDREventName.recordingStopped, event == null ? recording.getSessionId() : event.getSessionId(),
+				event == null ? recording.getCreatedAt() : event.getTimestamp(), reason, timestamp);
+		this.recording = recording;
 	}
 
 	@Override
@@ -44,7 +46,8 @@ public class CDREventRecording extends CDREventEnd {
 		json.addProperty("id", this.recording.getId());
 		json.addProperty("name", this.recording.getName());
 		json.addProperty("outputMode", this.recording.getOutputMode().name());
-		if (io.openvidu.java.client.Recording.OutputMode.COMPOSED.equals(this.recording.getOutputMode()) && this.recording.hasVideo()) {
+		if (io.openvidu.java.client.Recording.OutputMode.COMPOSED.equals(this.recording.getOutputMode())
+				&& this.recording.hasVideo()) {
 			json.addProperty("resolution", this.recording.getResolution());
 			json.addProperty("recordingLayout", this.recording.getRecordingLayout().name());
 			if (RecordingLayout.CUSTOM.equals(this.recording.getRecordingLayout())
@@ -57,6 +60,10 @@ public class CDREventRecording extends CDREventEnd {
 		json.addProperty("size", this.recording.getSize());
 		json.addProperty("duration", this.recording.getDuration());
 		return json;
+	}
+
+	public Recording getRecording() {
+		return this.recording;
 	}
 
 }

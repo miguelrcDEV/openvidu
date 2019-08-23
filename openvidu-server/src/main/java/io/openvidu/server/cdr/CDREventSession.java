@@ -17,6 +17,7 @@
 
 package io.openvidu.server.cdr;
 
+import io.openvidu.server.core.EndReason;
 import io.openvidu.server.core.Session;
 
 public class CDREventSession extends CDREventEnd {
@@ -30,8 +31,13 @@ public class CDREventSession extends CDREventEnd {
 	}
 
 	// sessionDestroyed
-	public CDREventSession(CDREvent event, String reason) {
-		super(CDREventName.sessionDestroyed, event.getSessionId(), event.getTimestamp(), reason);
+	public CDREventSession(CDREventSession event, EndReason reason, Long timestamp) {
+		super(CDREventName.sessionDestroyed, event.getSessionId(), event.getTimestamp(), reason, timestamp);
+		this.session = event.session;
+	}
+
+	public Session getSession() {
+		return this.session;
 	}
 
 }

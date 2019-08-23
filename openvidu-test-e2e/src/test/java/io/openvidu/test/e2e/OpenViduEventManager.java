@@ -95,11 +95,27 @@ public class OpenViduEventManager {
 
 		Thread.UncaughtExceptionHandler h = new Thread.UncaughtExceptionHandler() {
 			public void uncaughtException(Thread th, Throwable ex) {
+				if (ex.getClass().getSimpleName().equals("UnhandledAlertException")
+						&& ex.getMessage().contains("unexpected alert open")) {
+					stopPolling(false);
+					System.err
+							.println("Alert opened (" + ex.getMessage() + "). Waiting 1 second and restarting polling");
+					try {
+						Thread.sleep(1000);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+					startPolling();
+				}
 				if (ex.getClass().getSimpleName().equals("NoSuchSessionException")) {
 					System.err.println("Disposing driver when running 'executeScript'");
 				}
 			}
 		};
+
+		if (this.pollingThread != null) {
+			this.pollingThread.interrupt();
+		}
 
 		this.pollingThread = new Thread(() -> {
 			while (!this.isInterrupted.get()) {
@@ -116,12 +132,15 @@ public class OpenViduEventManager {
 		this.pollingThread.start();
 	}
 
-	public void stopPolling() {
+	public void stopPolling(boolean stopThread) {
 		this.eventCallbacks.clear();
 		this.eventCountdowns.clear();
 		this.eventNumbers.clear();
-		this.isInterrupted.set(true);
-		this.pollingThread.interrupt();
+
+		if (stopThread) {
+			this.isInterrupted.set(true);
+			this.pollingThread.interrupt();
+		}
 	}
 
 	public void on(String eventName, Consumer<JsonObject> callback) {
@@ -201,7 +220,7 @@ public class OpenViduEventManager {
 			JsonObject event = this.eventQueue.poll();
 			final String eventType = event.get("type").getAsString();
 
-			log.info(eventType + ": " + event);
+			log.info(eventType);
 
 			if (this.eventCallbacks.containsKey(eventType)) {
 				for (RunnableCallback callback : this.eventCallbacks.get(eventType)) {

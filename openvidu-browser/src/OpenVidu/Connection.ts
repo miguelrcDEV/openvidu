@@ -68,19 +68,11 @@ export class Connection {
      * @hidden
      */
     constructor(private session: Session, opts?: ConnectionOptions) {
-
         let msg = "'Connection' created ";
         if (!!opts) {
-            msg += "(remote) with 'connectionId' [" + opts.id + ']';
-        } else {
-            msg += '(local)';
-        }
-        console.info(msg);
-
-        this.options = opts;
-
-        if (!!opts) {
             // Connection is remote
+            msg += "(remote) with 'connectionId' [" + opts.id + ']';
+            this.options = opts;
             this.connectionId = opts.id;
             this.creationTime = opts.createdAt;
             if (opts.metadata) {
@@ -89,7 +81,11 @@ export class Connection {
             if (opts.streams) {
                 this.initRemoteStreams(opts.streams);
             }
+        } else {
+            // Connection is local
+            msg += '(local)';
         }
+        console.info(msg);
     }
 
 
@@ -100,8 +96,8 @@ export class Connection {
      */
     sendIceCandidate(candidate: RTCIceCandidate): void {
 
-        console.debug((!!this.stream.outboundStreamOpts ? 'Local' : 'Remote'), 'candidate for',
-            this.connectionId, JSON.stringify(candidate));
+        console.debug((!!this.stream.outboundStreamOpts ? 'Local' : 'Remote') + 'candidate for' +
+            this.connectionId, candidate);
 
         this.session.openvidu.sendRequest('onIceCandidate', {
             endpointName: this.connectionId,

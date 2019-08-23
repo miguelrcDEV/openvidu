@@ -18,9 +18,11 @@
 package io.openvidu.server.utils;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.util.Properties;
 
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
@@ -30,19 +32,43 @@ public class CustomFileManager {
 
 	private static final Logger log = LoggerFactory.getLogger(CustomFileManager.class);
 
-	public void createAndWriteFile(String filePath, String text) {
+	public boolean createAndWriteFile(String filePath, String text) {
 		try {
 			this.writeAndCloseOnOutputStreamWriter(new FileOutputStream(filePath), text);
+			return true;
 		} catch (IOException e) {
 			log.error("Couldn't create file {}. Error: {}", filePath, e.getMessage());
+			return false;
 		}
 	}
 
-	public void overwriteFile(String filePath, String text) {
+	public boolean overwriteFile(String filePath, String text) {
 		try {
 			this.writeAndCloseOnOutputStreamWriter(new FileOutputStream(filePath, false), text);
+			return true;
 		} catch (IOException e) {
 			log.error("Couldn't overwrite file {}. Error: {}", filePath, e.getMessage());
+			return false;
+		}
+	}
+
+	public void moveFile(String filePath, String newFilePath, boolean deleteFoldersWhileEmpty) {
+		try {
+			FileUtils.moveFile(FileUtils.getFile(filePath), FileUtils.getFile(newFilePath));
+		} catch (IOException e) {
+			log.error("Error moving file '{}' to new path '{}': {}", filePath, newFilePath, e.getMessage());
+		}
+		if (deleteFoldersWhileEmpty) {
+			boolean keepDeleting = true;
+			File folder = new File(filePath).getParentFile();
+			while (keepDeleting) {
+				if (folder.exists() && folder.isDirectory() && folder.listFiles().length == 0) {
+					folder.delete();
+					folder = folder.getParentFile();
+				} else {
+					keepDeleting = false;
+				}
+			}
 		}
 	}
 
@@ -58,9 +84,21 @@ public class CustomFileManager {
 	public void deleteFolder(String path) throws IOException {
 		FileUtils.deleteDirectory(new File(path));
 	}
-	
+
 	public void deleteFile(String path) throws IOException {
 		new File(path).delete();
+	}
+
+	public void overwriteProperties(Properties props, String filePath) throws FileNotFoundException, IOException {
+		FileOutputStream output = null;
+		try {
+			output = new FileOutputStream(filePath, false);
+			props.store(output, "");
+		} finally {
+			if (output != null) {
+				output.close();
+			}
+		}
 	}
 
 	private void writeAndCloseOnOutputStreamWriter(FileOutputStream fos, String text) throws IOException {

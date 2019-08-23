@@ -69,7 +69,7 @@ public class CompositeWrapper {
 		this.recorderEndpoint.addRecordingListener(new EventListener<RecordingEvent>() {
 			@Override
 			public void onEvent(RecordingEvent event) {
-				startTime = System.currentTimeMillis();
+				startTime = Long.parseLong(event.getTimestampMillis());
 				log.info("Recording started event for audio-only RecorderEndpoint of Composite in session {}",
 						session.getSessionId());
 				startLatch.countDown();
@@ -86,19 +86,27 @@ public class CompositeWrapper {
 		this.recorderEndpoint.record();
 	}
 
-	public synchronized void stopCompositeRecording(CountDownLatch stopLatch) {
-		this.recorderEndpoint.addStoppedListener(new EventListener<StoppedEvent>() {
-			@Override
-			public void onEvent(StoppedEvent event) {
-				endTime = System.currentTimeMillis();
-				log.info("Recording stopped event for audio-only RecorderEndpoint of Composite in session {}",
-						session.getSessionId());
-				recorderEndpoint.release();
-				compositeToRecorderHubPort.release();
-				stopLatch.countDown();
-			}
-		});
-		this.recorderEndpoint.stop();
+	public synchronized void stopCompositeRecording(CountDownLatch stopLatch, Long timeOfKmsDisconnection) {
+		if (timeOfKmsDisconnection == 0) {
+			this.recorderEndpoint.addStoppedListener(new EventListener<StoppedEvent>() {
+				@Override
+				public void onEvent(StoppedEvent event) {
+					endTime = Long.parseLong(event.getTimestampMillis());
+					log.info("Recording stopped event for audio-only RecorderEndpoint of Composite in session {}",
+							session.getSessionId());
+					recorderEndpoint.release();
+					compositeToRecorderHubPort.release();
+					stopLatch.countDown();
+				}
+			});
+			this.recorderEndpoint.stop();
+		} else {
+			endTime = timeOfKmsDisconnection;
+			stopLatch.countDown();
+			log.warn("Forcing composed audio-only recording stop after KMS restart in session {}",
+					this.session.getSessionId());
+		}
+
 	}
 
 	public void connectPublisherEndpoint(PublisherEndpoint endpoint) throws OpenViduException {

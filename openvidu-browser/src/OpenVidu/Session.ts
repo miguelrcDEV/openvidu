@@ -77,15 +77,14 @@ export class Session implements EventDispatcher {
      */
     remoteStreamsCreated: ObjMap<boolean> = {};
 
-    /**
-     * @hidden
+    /**	
+     * @hidden	
      */
     isFirstIonicIosSubscriber = true;
-    /**
-     * @hidden
+    /**	
+     * @hidden	
      */
-    countDownForIonicIosSubscribers = true;
-
+    countDownForIonicIosSubscribersActive = true;
     /**
      * @hidden
      */
@@ -160,7 +159,7 @@ export class Session implements EventDispatcher {
                     reject(error);
                 });
             } else {
-                reject(new OpenViduError(OpenViduErrorName.BROWSER_NOT_SUPPORTED, 'Browser ' + platform.name + ' for ' + platform.os!!.family + ' is not supported in OpenVidu'));
+                reject(new OpenViduError(OpenViduErrorName.BROWSER_NOT_SUPPORTED, 'Browser ' + platform.name + ' (version ' + platform.version + ') for ' + platform.os!!.family + ' is not supported in OpenVidu'));
             }
         });
     }
@@ -674,9 +673,10 @@ export class Session implements EventDispatcher {
                     streamEvent.callDefaultBehavior();
 
                     delete this.remoteStreamsCreated[stream.streamId];
+
                     if (Object.keys(this.remoteStreamsCreated).length === 0) {
                         this.isFirstIonicIosSubscriber = true;
-                        this.countDownForIonicIosSubscribers = true;
+                        this.countDownForIonicIosSubscribersActive = true;
                     }
                 }
                 delete this.remoteConnections[connection.connectionId];
@@ -747,10 +747,12 @@ export class Session implements EventDispatcher {
                     // Deleting the remote stream
                     const streamId: string = connection.stream.streamId;
                     delete this.remoteStreamsCreated[streamId];
+
                     if (Object.keys(this.remoteStreamsCreated).length === 0) {
                         this.isFirstIonicIosSubscriber = true;
-                        this.countDownForIonicIosSubscribers = true;
+                        this.countDownForIonicIosSubscribersActive = true;
                     }
+
                     connection.removeStream(streamId);
                 })
                 .catch(openViduError => {
@@ -833,7 +835,9 @@ export class Session implements EventDispatcher {
                         break;
                 }
                 this.ee.emitEvent('streamPropertyChanged', [new StreamPropertyChangedEvent(this, stream, msg.property, msg.newValue, oldValue, msg.reason)]);
-                stream.streamManager.emitEvent('streamPropertyChanged', [new StreamPropertyChangedEvent(stream.streamManager, stream, msg.property, msg.newValue, oldValue, msg.reason)]);
+                if (!!stream.streamManager) {
+                    stream.streamManager.emitEvent('streamPropertyChanged', [new StreamPropertyChangedEvent(stream.streamManager, stream, msg.property, msg.newValue, oldValue, msg.reason)]);
+                }
             } else {
                 console.error("No stream with streamId '" + msg.streamId + "' found for connection '" + msg.connectionId + "' on 'streamPropertyChanged' event");
             }
@@ -877,7 +881,7 @@ export class Session implements EventDispatcher {
                 return { candidate: msg.candidate };
             }
         };
-        this.getConnection(msg.endpointName, 'Connection not found for endpoint ' + msg.endpointName + '. Ice candidate will be ignored: ' + candidate)
+        this.getConnection(msg.senderConnectionId, 'Connection not found for connectionId ' + msg.senderConnectionId + ' owning endpoint ' + msg.endpointName + '. Ice candidate will be ignored: ' + candidate)
             .then(connection => {
                 const stream = connection.stream;
                 stream.getWebRtcPeer().addIceCandidate(candidate).catch(error => {
@@ -950,7 +954,7 @@ export class Session implements EventDispatcher {
      * @hidden
      */
     onRecordingStopped(response): void {
-        this.ee.emitEvent('recordingStopped', [new RecordingEvent(this, 'recordingStopped', response.id, response.name)]);
+        this.ee.emitEvent('recordingStopped', [new RecordingEvent(this, 'recordingStopped', response.id, response.name, response.reason)]);
     }
 
     /**
@@ -1021,10 +1025,10 @@ export class Session implements EventDispatcher {
                     const joinParams = {
                         token: (!!token) ? token : '',
                         session: this.sessionId,
-                        platform: platform.description,
+                        platform: !!platform.description ? platform.description : 'unknown',
                         metadata: !!this.options.metadata ? this.options.metadata : '',
                         secret: this.openvidu.getSecret(),
-                        recorder: this.openvidu.getRecorder(),
+                        recorder: this.openvidu.getRecorder()
                     };
 
                     this.openvidu.sendRequest('joinRoom', joinParams, (error, response) => {
@@ -1135,35 +1139,73 @@ export class Session implements EventDispatcher {
     }
 
     private processToken(token: string): void {
-        const url = new URL(token);
-        this.sessionId = <string>url.searchParams.get('sessionId');
-        const secret = url.searchParams.get('secret');
-        const recorder = url.searchParams.get('recorder');
-        const turnUsername = url.searchParams.get('turnUsername');
-        const turnCredential = url.searchParams.get('turnCredential');
-        const role = url.searchParams.get('role');
+        const match = token.match(/^(wss?\:)\/\/(([^:\/?#]*)(?:\:([0-9]+))?)([\/]{0,1}[^?#]*)(\?[^#]*|)(#.*|)$/);
+        if (!!match) {
+            const url = {
+                protocol: match[1],
+                host: match[2],
+                hostname: match[3],
+                port: match[4],
+                pathname: match[5],
+                search: match[6],
+                hash: match[7]
+            };
 
-        if (!!secret) {
-            this.openvidu.secret = secret;
-        }
-        if (!!recorder) {
-            this.openvidu.recorder = true;
-        }
-        if (!!turnUsername && !!turnCredential) {
-            const stunUrl = 'stun:' + url.hostname + ':3478';
-            const turnUrl1 = 'turn:' + url.hostname + ':3478';
-            const turnUrl2 = turnUrl1 + '?transport=tcp';
-            this.openvidu.iceServers = [
-                { urls: [stunUrl] },
-                { urls: [turnUrl1, turnUrl2], username: turnUsername, credential: turnCredential }
-            ];
-            console.log('TURN temp credentials [' + turnUsername + ':' + turnCredential + ']');
-        }
-        if (!!role) {
-            this.openvidu.role = role;
-        }
+            const params = token.split('?');
+            const queryParams = decodeURI(params[1])
+                .split('&')
+                .map(param => param.split('='))
+                .reduce((values, [key, value]) => {
+                    values[key] = value
+                    return values
+                }, {});
 
-        this.openvidu.wsUri = 'wss://' + url.host + '/openvidu';
+            this.sessionId = <string>queryParams['sessionId'];
+            const secret = queryParams['secret'];
+            const recorder = queryParams['recorder'];
+            const turnUsername = queryParams['turnUsername'];
+            const turnCredential = queryParams['turnCredential'];
+            const role = queryParams['role'];
+            const webrtcStatsInterval = queryParams['webrtcStatsInterval'];
+            const openviduServerVersion = queryParams['version'];
+
+            if (!!secret) {
+                this.openvidu.secret = secret;
+            }
+            if (!!recorder) {
+                this.openvidu.recorder = true;
+            }
+            if (!!turnUsername && !!turnCredential) {
+                const stunUrl = 'stun:' + url.hostname + ':3478';
+                const turnUrl1 = 'turn:' + url.hostname + ':3478';
+                const turnUrl2 = turnUrl1 + '?transport=tcp';
+                this.openvidu.iceServers = [
+                    { urls: [stunUrl] },
+                    { urls: [turnUrl1, turnUrl2], username: turnUsername, credential: turnCredential }
+                ];
+                console.log('TURN temp credentials [' + turnUsername + ':' + turnCredential + ']');
+            }
+            if (!!role) {
+                this.openvidu.role = role;
+            }
+            if (!!webrtcStatsInterval) {
+                this.openvidu.webrtcStatsInterval = +webrtcStatsInterval;
+            }
+            if (!!openviduServerVersion) {
+                console.info("openvidu-server version: " + openviduServerVersion);
+                if (openviduServerVersion !== this.openvidu.libraryVersion) {
+                    console.error('OpenVidu Server (' + openviduServerVersion +
+                        ') and OpenVidu Browser (' + this.openvidu.libraryVersion +
+                        ') versions do NOT match. There may be incompatibilities')
+                }
+            }
+
+            this.openvidu.wsUri = 'wss://' + url.host + '/openvidu';
+            this.openvidu.httpUri = 'https://' + url.host;
+
+        } else {
+            console.error('Token "' + token + '" is not valid')
+        }
     }
 
 }

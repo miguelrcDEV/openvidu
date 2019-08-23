@@ -49,7 +49,7 @@ export class Recording {
     duration = 0;
 
     /**
-     * URL of the recording. You can access the file from there. It is `null` until recording is stopped or if OpenVidu Server configuration property `openvidu.recording.public-access` is false
+     * URL of the recording. You can access the file from there. It is `null` until recording reaches "ready" or "failed" status. If OpenVidu Server configuration property `openvidu.recording.public-access` is false, this path will be secured with OpenVidu credentials
      */
     url: string;
 
@@ -101,7 +101,8 @@ export namespace Recording {
     export enum Status {
 
         /**
-         * The recording is starting (cannot be stopped)
+         * The recording is starting (cannot be stopped). Some recording may not go
+		 * through this status and directly reach "started" status
          */
         starting = 'starting',
 
@@ -111,19 +112,21 @@ export namespace Recording {
         started = 'started',
 
         /**
-         * The recording has finished OK
-         */
+		 * The recording has stopped and is being processed. At some point it will reach
+		 * "ready" status
+		 */
         stopped = 'stopped',
 
         /**
-         * The recording is available for downloading. This status is reached for all
-         * stopped recordings if [OpenVidu Server configuration](https://openvidu.io/docs/reference-docs/openvidu-server-params/)
-         * property `openvidu.recording.public-access` is true
+         * The recording has finished OK and is available for download through OpenVidu
+		 * Server recordings endpoint:
+		 * https://YOUR_OPENVIDUSERVER_IP/recordings/{RECORDING_ID}/{RECORDING_NAME}.{EXTENSION}
          */
-        available = 'available',
+        ready = 'ready',
 
         /**
-         * The recording has failed
+         * The recording has failed. This status may be reached from "starting",
+		 * "started" and "stopped" status
          */
         failed = 'failed'
     }

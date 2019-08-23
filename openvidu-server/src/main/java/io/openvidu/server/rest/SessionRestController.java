@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.commons.lang3.RandomStringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,14 +44,15 @@ import com.google.gson.JsonParser;
 import io.openvidu.client.OpenViduException;
 import io.openvidu.client.internal.ProtocolElements;
 import io.openvidu.java.client.MediaMode;
+import io.openvidu.java.client.OpenViduRole;
 import io.openvidu.java.client.Recording.OutputMode;
 import io.openvidu.java.client.RecordingLayout;
 import io.openvidu.java.client.RecordingMode;
 import io.openvidu.java.client.RecordingProperties;
 import io.openvidu.java.client.SessionProperties;
 import io.openvidu.server.config.OpenviduConfig;
+import io.openvidu.server.core.EndReason;
 import io.openvidu.server.core.Participant;
-import io.openvidu.server.core.ParticipantRole;
 import io.openvidu.server.core.Session;
 import io.openvidu.server.core.SessionManager;
 import io.openvidu.server.kurento.core.KurentoTokenOptions;
@@ -59,7 +61,7 @@ import io.openvidu.server.recording.service.RecordingManager;
 
 /**
  *
- * @author Pablo Fuente Pérez
+ * @author Pablo Fuente (pablofuenteperez@gmail.com)
  */
 @RestController
 @CrossOrigin
@@ -80,7 +82,7 @@ public class SessionRestController {
 	@RequestMapping(value = "/sessions", method = RequestMethod.POST)
 	public ResponseEntity<?> getSessionId(@RequestBody(required = false) Map<?, ?> params) {
 
-		log.info("REST API: POST /api/sessions {}", params.toString());
+		log.info("REST API: POST /api/sessions {}", params != null ? params.toString() : "{}");
 
 		SessionProperties.Builder builder = new SessionProperties.Builder();
 		String customSessionId = null;
@@ -153,7 +155,7 @@ public class SessionRestController {
 			}
 			sessionId = customSessionId;
 		} else {
-			sessionId = sessionManager.generateRandomChain();
+			sessionId = RandomStringUtils.randomAlphanumeric(16).toLowerCase();
 			sessionManager.sessionidTokenTokenobj.putIfAbsent(sessionId, new ConcurrentHashMap<>());
 		}
 
@@ -212,12 +214,12 @@ public class SessionRestController {
 
 		Session session = this.sessionManager.getSession(sessionId);
 		if (session != null) {
-			this.sessionManager.closeSession(sessionId, "sessionClosedByServer");
+			this.sessionManager.closeSession(sessionId, EndReason.sessionClosedByServer);
 			return new ResponseEntity<>(HttpStatus.NO_CONTENT);
 		} else {
 			Session sessionNotActive = this.sessionManager.getSessionNotActive(sessionId);
 			if (sessionNotActive != null) {
-				this.sessionManager.closeSessionAndEmptyCollections(sessionNotActive, "sessionClosedByServer");
+				this.sessionManager.closeSessionAndEmptyCollections(sessionNotActive, EndReason.sessionClosedByServer);
 				return new ResponseEntity<>(HttpStatus.NO_CONTENT);
 			} else {
 				return new ResponseEntity<>(HttpStatus.NOT_FOUND);
@@ -235,7 +237,7 @@ public class SessionRestController {
 		if (session != null) {
 			Participant participant = session.getParticipantByPublicId(participantPublicId);
 			if (participant != null) {
-				this.sessionManager.evictParticipant(participant, null, null, "forceDisconnectByServer");
+				this.sessionManager.evictParticipant(participant, null, null, EndReason.forceDisconnectByServer);
 				return new ResponseEntity<>(HttpStatus.NO_CONTENT);
 			} else {
 				return new ResponseEntity<>(HttpStatus.NOT_FOUND);
@@ -256,7 +258,7 @@ public class SessionRestController {
 
 		Session session = this.sessionManager.getSession(sessionId);
 		if (session != null) {
-			if (this.sessionManager.unpublishStream(session, streamId, null, null, "forceUnpublishByServer")) {
+			if (this.sessionManager.unpublishStream(session, streamId, null, null, EndReason.forceUnpublishByServer)) {
 				return new ResponseEntity<>(HttpStatus.NO_CONTENT);
 			} else {
 				return new ResponseEntity<>(HttpStatus.NOT_FOUND);
@@ -272,6 +274,11 @@ public class SessionRestController {
 	@RequestMapping(value = "/tokens", method = RequestMethod.POST)
 	public ResponseEntity<String> newToken(@RequestBody Map<?, ?> params) {
 
+		if (params == null) {
+			return this.generateErrorResponse("Error in body parameters. Cannot be empty", "/api/tokens",
+					HttpStatus.BAD_REQUEST);
+		}
+
 		log.info("REST API: POST /api/tokens {}", params.toString());
 
 		String sessionId;
@@ -286,7 +293,8 @@ public class SessionRestController {
 		}
 
 		if (sessionId == null) {
-			return this.generateErrorResponse("Type error in some parameter", "/api/tokens", HttpStatus.BAD_REQUEST);
+			return this.generateErrorResponse("\"session\" parameter is mandatory", "/api/tokens",
+					HttpStatus.BAD_REQUEST);
 		}
 
 		JsonObject kurentoOptions = null;
@@ -300,12 +308,12 @@ public class SessionRestController {
 			}
 		}
 
-		ParticipantRole role;
+		OpenViduRole role;
 		try {
 			if (roleString != null) {
-				role = ParticipantRole.valueOf(roleString);
+				role = OpenViduRole.valueOf(roleString);
 			} else {
-				role = ParticipantRole.PUBLISHER;
+				role = OpenViduRole.PUBLISHER;
 			}
 		} catch (IllegalArgumentException e) {
 			return this.generateErrorResponse("Parameter role " + params.get("role") + " is not defined", "/api/tokens",
@@ -371,6 +379,11 @@ public class SessionRestController {
 	@RequestMapping(value = "/recordings/start", method = RequestMethod.POST)
 	public ResponseEntity<?> startRecordingSession(@RequestBody Map<?, ?> params) {
 
+		if (params == null) {
+			return this.generateErrorResponse("Error in body parameters. Cannot be empty", "/api/recordings/start",
+					HttpStatus.BAD_REQUEST);
+		}
+
 		log.info("REST API: POST /api/recordings/start {}", params.toString());
 
 		if (!this.openviduConfig.isRecordingModuleEnabled()) {
@@ -402,7 +415,7 @@ public class SessionRestController {
 
 		if (sessionId == null) {
 			// "session" parameter not found
-			return this.generateErrorResponse("session parameter is mandatory", "/api/recordings/start",
+			return this.generateErrorResponse("\"session\" parameter is mandatory", "/api/recordings/start",
 					HttpStatus.BAD_REQUEST);
 		}
 
@@ -512,14 +525,13 @@ public class SessionRestController {
 		Session session = sessionManager.getSession(recording.getSessionId());
 
 		Recording stoppedRecording = this.recordingManager.stopRecording(session, recording.getId(),
-				"recordingStoppedByServer");
+				EndReason.recordingStoppedByServer);
 
 		session.recordingManuallyStopped.set(true);
 
 		if (session != null && OutputMode.COMPOSED.equals(recording.getOutputMode()) && recording.hasVideo()) {
 			sessionManager.evictParticipant(
-					session.getParticipantByPublicId(ProtocolElements.RECORDER_PARTICIPANT_PUBLICID), null, null,
-					"EVICT_RECORDER");
+					session.getParticipantByPublicId(ProtocolElements.RECORDER_PARTICIPANT_PUBLICID), null, null, null);
 		}
 
 		return new ResponseEntity<>(stoppedRecording.toJson().toString(), getResponseHeaders(), HttpStatus.OK);

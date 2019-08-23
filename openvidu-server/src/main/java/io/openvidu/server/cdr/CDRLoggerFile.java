@@ -20,6 +20,9 @@ package io.openvidu.server.cdr;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.openvidu.server.kurento.endpoint.KmsEvent;
+import io.openvidu.server.summary.SessionSummary;
+
 public class CDRLoggerFile implements CDRLogger {
 
 	private Logger log = LoggerFactory.getLogger(CDRLoggerFile.class);
@@ -30,8 +33,11 @@ public class CDRLoggerFile implements CDRLogger {
 	}
 
 	@Override
-	public boolean canBeDisabled() {
-		return true;
+	public void log(KmsEvent event) {
+	}
+
+	@Override
+	public void log(SessionSummary sessionSummary) {
 	}
 
 }

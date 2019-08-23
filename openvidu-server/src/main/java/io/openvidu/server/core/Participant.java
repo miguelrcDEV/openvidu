@@ -19,26 +19,32 @@ package io.openvidu.server.core;
 
 import com.google.gson.JsonObject;
 
+import io.openvidu.server.utils.GeoLocation;
+
 public class Participant {
 
-	private String participantPrivatetId; // ID to identify the user on server (org.kurento.jsonrpc.Session.id)
-	private String participantPublicId; // ID to identify the user on clients
-	private Long createdAt; // Timestamp when this connection was established
-	private String clientMetadata = ""; // Metadata provided on client side
-	private String serverMetadata = ""; // Metadata provided on server side
-	private Token token; // Token associated to this participant
-	private String location; // Remote IP of the participant
-	private String platform; // Platform used by the participant to connect to the session
+	protected String finalUserId; // ID to match this connection with a final user (HttpSession id)
+	protected String participantPrivatetId; // ID to identify the user on server (org.kurento.jsonrpc.Session.id)
+	protected String participantPublicId; // ID to identify the user on clients
+	private String sessionId; // ID of the session to which the participant belongs
+	protected Long createdAt; // Timestamp when this connection was established
+	protected String clientMetadata = ""; // Metadata provided on client side
+	protected String serverMetadata = ""; // Metadata provided on server side
+	protected Token token; // Token associated to this participant
+	protected GeoLocation location; // Location of the participant
+	protected String platform; // Platform used by the participant to connect to the session
 
 	protected boolean streaming = false;
 	protected volatile boolean closed;
 
 	private final String METADATA_SEPARATOR = "%/%";
 
-	public Participant(String participantPrivatetId, String participantPublicId, Token token, String clientMetadata,
-			String location, String platform, Long createdAt) {
+	public Participant(String finalUserId, String participantPrivatetId, String participantPublicId, String sessionId,
+			Token token, String clientMetadata, GeoLocation location, String platform, Long createdAt) {
+		this.finalUserId = finalUserId;
 		this.participantPrivatetId = participantPrivatetId;
 		this.participantPublicId = participantPublicId;
+		this.sessionId = sessionId;
 		if (createdAt != null) {
 			this.createdAt = createdAt;
 		} else {
@@ -50,6 +56,10 @@ public class Participant {
 			this.serverMetadata = token.getServerMetadata();
 		this.location = location;
 		this.platform = platform;
+	}
+
+	public String getFinalUserId() {
+		return finalUserId;
 	}
 
 	public String getParticipantPrivateId() {
@@ -66,6 +76,10 @@ public class Participant {
 
 	public void setParticipantPublicId(String participantPublicId) {
 		this.participantPublicId = participantPublicId;
+	}
+
+	public String getSessionId() {
+		return sessionId;
 	}
 
 	public Long getCreatedAt() {
@@ -96,11 +110,11 @@ public class Participant {
 		this.token = token;
 	}
 
-	public String getLocation() {
+	public GeoLocation getLocation() {
 		return this.location;
 	}
 
-	public void setLocation(String location) {
+	public void setLocation(GeoLocation location) {
 		this.location = location;
 	}
 
@@ -198,7 +212,7 @@ public class Participant {
 		JsonObject json = new JsonObject();
 		json.addProperty("connectionId", this.participantPublicId);
 		json.addProperty("createdAt", this.createdAt);
-		json.addProperty("location", this.location);
+		json.addProperty("location", this.location != null ? this.location.toString() : "unknown");
 		json.addProperty("platform", this.platform);
 		json.addProperty("token", this.token.getToken());
 		json.addProperty("role", this.token.getRole().name());

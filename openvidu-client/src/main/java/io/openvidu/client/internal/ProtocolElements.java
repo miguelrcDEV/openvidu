@@ -163,6 +163,7 @@ public class ProtocolElements {
 	public static final String MEDIAERROR_ERROR_PARAM = "error";
 
 	public static final String ICECANDIDATE_METHOD = "iceCandidate";
+	public static final String ICECANDIDATE_SENDERCONNECTIONID_PARAM = "senderConnectionId";
 	public static final String ICECANDIDATE_EPNAME_PARAM = "endpointName";
 	public static final String ICECANDIDATE_CANDIDATE_PARAM = "candidate";
 	public static final String ICECANDIDATE_SDPMID_PARAM = "sdpMid";
@@ -171,6 +172,7 @@ public class ProtocolElements {
 	public static final String RECORDINGSTARTED_METHOD = "recordingStarted";
 	public static final String RECORDINGSTARTED_ID_PARAM = "id";
 	public static final String RECORDINGSTARTED_NAME_PARAM = "name";
+	public static final String RECORDINGSTOPPED_REASON_PARAM = "reason";
 
 	public static final String RECORDINGSTOPPED_METHOD = "recordingStopped";
 	public static final String RECORDINGSTOPPED_ID_PARAM = "id";

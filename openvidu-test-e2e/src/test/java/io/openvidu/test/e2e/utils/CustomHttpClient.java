@@ -100,17 +100,23 @@ public class CustomHttpClient {
 		JSONObject jsonObjExpected = null;
 		jsonReturnedValue.replaceAll("'", "\"");
 		try {
-			jsonObjExpected = new JSONObject((String) jsonReturnedValue);
+			jsonObjExpected = new JSONObject(jsonReturnedValue);
 		} catch (JSONException e1) {
 			Assert.fail("Expected json element is a string without a JSON format: " + jsonReturnedValue);
 		}
 
 		if (exactReturnedFields) {
-			Assert.assertEquals("Error in number of keys in JSON response to POST " + path, jsonObjExpected.length(),
-					json.length());
+			Assert.assertEquals("Error in number of keys in JSON response to POST (" + json.toString() + ")" + path,
+					jsonObjExpected.length(), json.length());
 		}
 		for (String key : jsonObjExpected.keySet()) {
-			json.get(key);
+			Class<?> c1 = jsonObjExpected.get(key).getClass();
+			Class<?> c2 = json.get(key).getClass();
+
+			c1 = unifyNumberType(c1);
+			c2 = unifyNumberType(c2);
+
+			Assert.assertTrue("Wrong class of property " + key, c1.equals(c2));
 		}
 		return json;
 	}
@@ -210,7 +216,18 @@ public class CustomHttpClient {
 			log.error(e.getMessage());
 			Assert.fail("Error sending request to " + path + ": " + e.getMessage());
 		}
+		if (jsonResponse.getStatus() == 500) {
+			log.error("Internal Server Error: {}", jsonResponse.getBody().toString());
+		}
 		Assert.assertEquals(path + " expected to return status " + status, status, jsonResponse.getStatus());
 		return json;
 	}
+
+	private Class<?> unifyNumberType(Class<?> myClass) {
+		if (Number.class.isAssignableFrom(myClass)) {
+			return Number.class;
+		}
+		return myClass;
+	}
+
 }

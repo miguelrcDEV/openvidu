@@ -46,7 +46,6 @@ import io.openvidu.client.OpenViduException;
 import io.openvidu.client.OpenViduException.Code;
 import io.openvidu.server.config.OpenviduConfig;
 import io.openvidu.server.core.MediaOptions;
-import io.openvidu.server.kurento.TrackType;
 import io.openvidu.server.kurento.core.KurentoParticipant;
 import io.openvidu.server.utils.JsonUtils;
 
@@ -136,7 +135,7 @@ public class PublisherEndpoint extends MediaEndpoint {
 
 	public boolean removeParticipantAsListenerOfFilterEvent(String eventType, String participantPublicId) {
 		if (!this.subscribersToFilterEvents.containsKey(eventType)) {
-			String streamId = this.getEndpoint().getName();
+			String streamId = this.getStreamId();
 			log.error("Request to removeFilterEventListener to stream {} gone wrong: Filter {} has no listener added",
 					streamId, eventType);
 			throw new OpenViduException(Code.FILTER_EVENT_LISTENER_NOT_FOUND,
@@ -164,22 +163,18 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 * itself (after applying the intermediate media elements and the
 	 * {@link PassThrough}) to allow loopback of the media stream.
 	 *
-	 * @param sdpType
-	 *            indicates the type of the sdpString (offer or answer)
-	 * @param sdpString
-	 *            offer or answer from the remote peer
-	 * @param doLoopback
-	 *            loopback flag
-	 * @param loopbackAlternativeSrc
-	 *            alternative loopback source
-	 * @param loopbackConnectionType
-	 *            how to connect the loopback source
+	 * @param sdpType                indicates the type of the sdpString (offer or
+	 *                               answer)
+	 * @param sdpString              offer or answer from the remote peer
+	 * @param doLoopback             loopback flag
+	 * @param loopbackAlternativeSrc alternative loopback source
+	 * @param loopbackConnectionType how to connect the loopback source
 	 * @return the SDP response (the answer if processing an offer SDP, otherwise is
 	 *         the updated offer generated previously by this endpoint)
 	 */
 	public synchronized String publish(SdpType sdpType, String sdpString, boolean doLoopback,
 			MediaElement loopbackAlternativeSrc, MediaType loopbackConnectionType) {
-		registerOnIceCandidateEventListener();
+		registerOnIceCandidateEventListener(this.getOwner().getParticipantPublicId());
 		if (doLoopback) {
 			if (loopbackAlternativeSrc == null) {
 				connect(this.getEndpoint(), loopbackConnectionType);
@@ -238,12 +233,10 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 * is left ready for when the connections between elements will materialize and
 	 * the streaming begins.
 	 *
-	 * @param shaper
-	 *            {@link MediaElement} that will be linked to the end of the chain
-	 *            (e.g. a filter)
+	 * @param shaper {@link MediaElement} that will be linked to the end of the
+	 *               chain (e.g. a filter)
 	 * @return the element's id
-	 * @throws OpenViduException
-	 *             if thrown, the media element was not added
+	 * @throws OpenViduException if thrown, the media element was not added
 	 */
 	public String apply(GenericMediaElement shaper) throws OpenViduException {
 		return apply(shaper, null);
@@ -253,15 +246,12 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 * Same as {@link #apply(MediaElement)}, can specify the media type that will be
 	 * streamed through the shaper element.
 	 *
-	 * @param shaper
-	 *            {@link MediaElement} that will be linked to the end of the chain
-	 *            (e.g. a filter)
-	 * @param type
-	 *            indicates which type of media will be connected to the shaper
-	 *            ({@link MediaType}), if null then the connection is mixed
+	 * @param shaper {@link MediaElement} that will be linked to the end of the
+	 *               chain (e.g. a filter)
+	 * @param type   indicates which type of media will be connected to the shaper
+	 *               ({@link MediaType}), if null then the connection is mixed
 	 * @return the element's id
-	 * @throws OpenViduException
-	 *             if thrown, the media element was not added
+	 * @throws OpenViduException if thrown, the media element was not added
 	 */
 	public synchronized String apply(GenericMediaElement shaper, MediaType type) throws OpenViduException {
 		String id = shaper.getId();
@@ -299,10 +289,8 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 * object is released. If the chain is connected, both adjacent remaining
 	 * elements will be interconnected.
 	 *
-	 * @param shaper
-	 *            {@link MediaElement} that will be removed from the chain
-	 * @throws OpenViduException
-	 *             if thrown, the media element was not removed
+	 * @param shaper {@link MediaElement} that will be removed from the chain
+	 * @throws OpenViduException if thrown, the media element was not removed
 	 */
 	public synchronized void revert(MediaElement shaper) throws OpenViduException {
 		revert(shaper, true);
@@ -477,9 +465,9 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 *
 	 * @param source
 	 * @param sink
-	 * @param type
-	 *            if null, {@link #internalSinkConnect(MediaElement, MediaElement)}
-	 *            will be used instead
+	 * @param type   if null,
+	 *               {@link #internalSinkConnect(MediaElement, MediaElement)} will
+	 *               be used instead
 	 * @see #internalSinkConnect(MediaElement, MediaElement)
 	 */
 	private void internalSinkConnect(final MediaElement source, final MediaElement sink, final MediaType type) {
@@ -524,9 +512,9 @@ public class PublisherEndpoint extends MediaEndpoint {
 	 *
 	 * @param source
 	 * @param sink
-	 * @param type
-	 *            if null, {@link #internalSinkConnect(MediaElement, MediaElement)}
-	 *            will be used instead
+	 * @param type   if null,
+	 *               {@link #internalSinkConnect(MediaElement, MediaElement)} will
+	 *               be used instead
 	 * @see #internalSinkConnect(MediaElement, MediaElement)
 	 */
 	private void internalSinkDisconnect(final MediaElement source, final MediaElement sink, final MediaType type) {
@@ -549,11 +537,6 @@ public class PublisherEndpoint extends MediaEndpoint {
 		}
 	}
 
-	@Override
-	public PublisherEndpoint getPublisher() {
-		return this;
-	}
-
 	public MediaOptions getMediaOptions() {
 		return mediaOptions;
 	}
@@ -565,7 +548,7 @@ public class PublisherEndpoint extends MediaEndpoint {
 	@Override
 	public JsonObject toJson() {
 		JsonObject json = super.toJson();
-		json.addProperty("streamId", this.getEndpoint().getName());
+		json.addProperty("streamId", this.getStreamId());
 		json.add("mediaOptions", this.mediaOptions.toJson());
 		return json;
 	}
@@ -584,4 +567,5 @@ public class PublisherEndpoint extends MediaEndpoint {
 		return "{filter: " + ((this.filter != null) ? this.filter.getName() : "null") + ", listener: "
 				+ this.filterListeners.toString() + ", subscribers: " + this.subscribersToFilterEvents.toString() + "}";
 	}
+
 }

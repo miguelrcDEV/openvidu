@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
 
 import org.kurento.client.Continuation;
 import org.kurento.client.ErrorEvent;
@@ -34,11 +35,9 @@ import org.kurento.client.OnIceCandidateEvent;
 import org.kurento.client.RtpEndpoint;
 import org.kurento.client.SdpEndpoint;
 import org.kurento.client.WebRtcEndpoint;
-import org.kurento.jsonrpc.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -73,7 +72,10 @@ public abstract class MediaEndpoint {
 	private final int minSendKbps;
 
 	private KurentoParticipant owner;
-	private String endpointName;
+	protected String endpointName; // KMS media object identifier. Unique for every MediaEndpoint
+	protected String streamId; // OpenVidu Stream identifier. Common property for a
+								// PublisherEndpoint->SubscriberEndpoint flow. Equal to endpointName for
+								// PublisherEndpoints, different for SubscriberEndpoints
 	protected Long createdAt; // Timestamp when this [publisher / subscriber] started [publishing / receiving]
 
 	private MediaPipeline pipeline = null;
@@ -85,6 +87,7 @@ public abstract class MediaEndpoint {
 	public String selectedLocalIceCandidate;
 	public String selectedRemoteIceCandidate;
 	public Queue<KmsEvent> kmsEvents = new ConcurrentLinkedQueue<>();
+	public Future<?> kmsWebrtcStatsThread;
 
 	/**
 	 * Constructor to set the owner, the endpoint's name and the media pipeline.
@@ -208,20 +211,23 @@ public abstract class MediaEndpoint {
 		this.pipeline = pipeline;
 	}
 
-	/**
-	 * @return name of this endpoint (as indicated by the browser)
-	 */
 	public String getEndpointName() {
+		if (endpointName == null) {
+			endpointName = this.getEndpoint().getName();
+		}
 		return endpointName;
 	}
 
-	/**
-	 * Sets the endpoint's name (as indicated by the browser).
-	 *
-	 * @param endpointName the name
-	 */
 	public void setEndpointName(String endpointName) {
 		this.endpointName = endpointName;
+	}
+
+	public String getStreamId() {
+		return streamId;
+	}
+
+	public void setStreamId(String streamId) {
+		this.streamId = streamId;
 	}
 
 	/**
@@ -413,7 +419,7 @@ public abstract class MediaEndpoint {
 	 * @see Participant#sendIceCandidate(String, IceCandidate)
 	 * @throws OpenViduException if thrown, unable to register the listener
 	 */
-	protected void registerOnIceCandidateEventListener() throws OpenViduException {
+	protected void registerOnIceCandidateEventListener(String senderPublicId) throws OpenViduException {
 		if (!this.isWeb()) {
 			return;
 		}
@@ -424,7 +430,7 @@ public abstract class MediaEndpoint {
 		webEndpoint.addOnIceCandidateListener(new EventListener<OnIceCandidateEvent>() {
 			@Override
 			public void onEvent(OnIceCandidateEvent event) {
-				owner.sendIceCandidate(endpointName, event.getCandidate());
+				owner.sendIceCandidate(senderPublicId, endpointName, event.getCandidate());
 			}
 		});
 	}
@@ -473,8 +479,6 @@ public abstract class MediaEndpoint {
 		});
 	}
 
-	public abstract PublisherEndpoint getPublisher();
-
 	public JsonObject toJson() {
 		JsonObject json = new JsonObject();
 		json.addProperty("createdAt", this.createdAt);
@@ -484,27 +488,24 @@ public abstract class MediaEndpoint {
 	public JsonObject withStatsToJson() {
 		JsonObject json = new JsonObject();
 		json.addProperty("createdAt", this.createdAt);
-		json.addProperty("webrtcEndpointName", this.getEndpoint().getName());
+		json.addProperty("webrtcEndpointName", this.getEndpointName());
 		json.addProperty("remoteSdp", this.getEndpoint().getRemoteSessionDescriptor());
 		json.addProperty("localSdp", this.getEndpoint().getLocalSessionDescriptor());
 		json.add("receivedCandidates", new GsonBuilder().create().toJsonTree(this.receivedCandidateList));
 		json.addProperty("localCandidate", this.selectedLocalIceCandidate);
 		json.addProperty("remoteCandidate", this.selectedRemoteIceCandidate);
-		if (openviduConfig.isKmsStatsEnabled()) {
-			json.addProperty("serverStats", new Gson().toJson(this.webEndpoint.getStats()));
-		}
 
 		JsonArray jsonArray = new JsonArray();
-		for (KmsEvent event : this.kmsEvents) {
-			JsonObject jsonKmsEvent = JsonUtils.toJsonObject(event.event);
-			// Set source name
-			jsonKmsEvent.addProperty("source", event.endpoint);
-			// Set custom more precise timestamp
-			jsonKmsEvent.addProperty("timestamp", event.timestamp);
-			// Set milliseconds since the Publisher or Subscriber started transmitting media
-			jsonKmsEvent.addProperty("msSinceCreation", event.msSinceCreation);
-			jsonArray.add(jsonKmsEvent);
-		}
+		this.kmsEvents.forEach(ev -> {
+			// Remove unwanted properties
+			JsonObject j = ev.toJson();
+			j.remove("session");
+			j.remove("user");
+			j.remove("connection");
+			j.remove("endpoint");
+			j.remove("timestampMillis");
+			jsonArray.add(j);
+		});
 		json.add("events", jsonArray);
 
 		return json;

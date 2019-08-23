@@ -65,7 +65,7 @@ export class Session {
     /**
      * @hidden
      */
-    constructor(propertiesOrJson?) {
+    constructor(private ov: OpenVidu, propertiesOrJson?) {
         if (!!propertiesOrJson) {
             // Defined parameter
             if (!!propertiesOrJson.sessionId) {
@@ -108,11 +108,11 @@ export class Session {
             });
 
             axios.post(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_TOKENS,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_TOKENS,
                 data,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/json'
                     }
                 }
@@ -152,10 +152,10 @@ export class Session {
     public close(): Promise<any> {
         return new Promise<any>((resolve, reject) => {
             axios.delete(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_SESSIONS + '/' + this.sessionId,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_SESSIONS + '/' + this.sessionId,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/x-www-form-urlencoded'
                     }
                 }
@@ -163,8 +163,8 @@ export class Session {
                 .then(res => {
                     if (res.status === 204) {
                         // SUCCESS response from openvidu-server
-                        const indexToRemove: number = OpenVidu.getActiveSessions().findIndex(s => s.sessionId === this.sessionId);
-                        OpenVidu.getActiveSessions().splice(indexToRemove, 1);
+                        const indexToRemove: number = this.ov.activeSessions.findIndex(s => s.sessionId === this.sessionId);
+                        this.ov.activeSessions.splice(indexToRemove, 1);
                         resolve();
                     } else {
                         // ERROR response from openvidu-server. Resolve HTTP status
@@ -200,12 +200,12 @@ export class Session {
      */
     public fetch(): Promise<boolean> {
         return new Promise<boolean>((resolve, reject) => {
-            const beforeJSON: string = JSON.stringify(this);
+            const beforeJSON: string = JSON.stringify(this, this.removeCircularOpenViduReference);
             axios.get(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_SESSIONS + '/' + this.sessionId,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_SESSIONS + '/' + this.sessionId,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/x-www-form-urlencoded'
                     }
                 }
@@ -214,7 +214,7 @@ export class Session {
                     if (res.status === 200) {
                         // SUCCESS response from openvidu-server
                         this.resetSessionWithJson(res.data);
-                        const afterJSON: string = JSON.stringify(this);
+                        const afterJSON: string = JSON.stringify(this, this.removeCircularOpenViduReference);
                         const hasChanged: boolean = !(beforeJSON === afterJSON);
                         console.log("Session info fetched for session '" + this.sessionId + "'. Any change: " + hasChanged);
                         resolve(hasChanged);
@@ -254,10 +254,10 @@ export class Session {
         return new Promise<any>((resolve, reject) => {
             const connectionId: string = typeof connection === 'string' ? connection : (<Connection>connection).connectionId;
             axios.delete(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_SESSIONS + '/' + this.sessionId + '/connection/' + connectionId,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_SESSIONS + '/' + this.sessionId + '/connection/' + connectionId,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/x-www-form-urlencoded'
                     }
                 })
@@ -333,10 +333,10 @@ export class Session {
         return new Promise<any>((resolve, reject) => {
             const streamId: string = typeof publisher === 'string' ? publisher : (<Publisher>publisher).streamId;
             axios.delete(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_SESSIONS + '/' + this.sessionId + '/stream/' + streamId,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_SESSIONS + '/' + this.sessionId + '/stream/' + streamId,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/x-www-form-urlencoded'
                     }
                 }
@@ -405,11 +405,11 @@ export class Session {
             });
 
             axios.post(
-                'https://' + OpenVidu.hostname + ':' + OpenVidu.port + OpenVidu.API_SESSIONS,
+                'https://' + this.ov.hostname + ':' + this.ov.port + OpenVidu.API_SESSIONS,
                 data,
                 {
                     headers: {
-                        'Authorization': OpenVidu.basicAuth,
+                        'Authorization': this.ov.basicAuth,
                         'Content-Type': 'application/json'
                     }
                 }
@@ -525,6 +525,17 @@ export class Session {
             return equals;
         } else {
             return false;
+        }
+    }
+
+    /**
+     * @hidden
+     */
+    private removeCircularOpenViduReference(key: string, value: any) {
+        if (key === 'ov' && value instanceof OpenVidu) {
+            return;
+        } else {
+            return value;
         }
     }
 

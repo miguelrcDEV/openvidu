@@ -25,7 +25,6 @@ import { VideoInsertMode } from '../OpenViduInternal/Enums/VideoInsertMode';
 
 import EventEmitter = require('wolfy87-eventemitter');
 import platform = require('platform');
-platform['isIonicIos'] = (platform.product === 'iPhone' || platform.product === 'iPad') && platform.ua!!.indexOf('Safari') === -1;
 
 /**
  * Interface in charge of displaying the media streams in the HTML DOM. This wraps any [[Publisher]] and [[Subscriber]] object.
@@ -84,11 +83,11 @@ export class StreamManager implements EventDispatcher {
     /**
      * @hidden
      */
-    protected ee = new EventEmitter();
+    ee = new EventEmitter();
     /**
      * @hidden
      */
-    protected canPlayListener: EventListenerOrEventListenerObject;
+    protected canPlayListener: EventListener;
 
 
     /**
@@ -111,7 +110,8 @@ export class StreamManager implements EventDispatcher {
                 this.firstVideoElement = {
                     targetElement: targEl,
                     video: document.createElement('video'),
-                    id: ''
+                    id: '',
+                    canplayListenerAdded: false
                 };
                 if (platform.name === 'Safari') {
                     this.firstVideoElement.video.setAttribute('playsinline', 'true');
@@ -120,6 +120,7 @@ export class StreamManager implements EventDispatcher {
                 this.element = targEl;
             }
         }
+
         this.canPlayListener = () => {
             if (this.stream.isLocal()) {
                 if (!this.stream.displayMyRemote()) {
@@ -237,7 +238,9 @@ export class StreamManager implements EventDispatcher {
         this.initializeVideoProperties(video);
 
         if (this.stream.isLocal() && this.stream.displayMyRemote()) {
-            video.srcObject = this.stream.getMediaStream();
+            if (video.srcObject !== this.stream.getMediaStream()) {
+                video.srcObject = this.stream.getMediaStream();
+            }
         }
 
         // If the video element is already part of this StreamManager do nothing
@@ -262,7 +265,8 @@ export class StreamManager implements EventDispatcher {
 
         this.pushNewStreamManagerVideo({
             video,
-            id: video.id
+            id: video.id,
+            canplayListenerAdded: false
         });
 
         console.info('New video element associated to ', this);
@@ -279,11 +283,13 @@ export class StreamManager implements EventDispatcher {
      *
      * @param targetElement HTML DOM element (or its `id` attribute) in which the video element of the Publisher/Subscriber will be inserted
      * @param insertMode How the video element will be inserted accordingly to `targetElemet`
+     *
+     * @returns The created HTMLVideoElement
      */
     createVideoElement(targetElement?: string | HTMLElement, insertMode?: VideoInsertMode): HTMLVideoElement {
         let targEl;
         if (typeof targetElement === 'string') {
-            targEl = document.getElementById(targEl);
+            targEl = document.getElementById(targetElement);
             if (!targEl) {
                 throw new Error("The provided 'targetElement' couldn't be resolved to any HTML element: " + targetElement);
             }
@@ -323,12 +329,12 @@ export class StreamManager implements EventDispatcher {
             targetElement: targEl,
             video,
             insertMode: insMode,
-            id: video.id
+            id: video.id,
+            canplayListenerAdded: false
         };
         this.pushNewStreamManagerVideo(v);
 
         this.ee.emitEvent('videoElementCreated', [new VideoElementEvent(v.video, this, 'videoElementCreated')]);
-
         this.lazyLaunchVideoElementCreatedEvent = !!this.firstVideoElement;
 
         return video;
@@ -340,7 +346,10 @@ export class StreamManager implements EventDispatcher {
     initializeVideoProperties(video: HTMLVideoElement): void {
         if (!(this.stream.isLocal() && this.stream.displayMyRemote())) {
             // Avoid setting the MediaStream into the srcObject if remote subscription before publishing
-            video.srcObject = this.stream.getMediaStream();
+            if (video.srcObject !== this.stream.getMediaStream()) {
+                // If srcObject already set don't do it again
+                video.srcObject = this.stream.getMediaStream();
+            }
         }
         video.autoplay = true;
         video.controls = false;
@@ -351,17 +360,18 @@ export class StreamManager implements EventDispatcher {
 
         if (!video.id) {
             video.id = (this.remote ? 'remote-' : 'local-') + 'video-' + this.stream.streamId;
-            // DEPRECATED property: assign once the property id if the user provided a valid targetElement
+            // DEPRECATED property: assign once the property id if the user provided a valid targetElement	
             if (!this.id && !!this.targetElement) {
                 this.id = video.id;
             }
         }
+
         if (!this.remote && !this.stream.displayMyRemote()) {
             video.muted = true;
             if (video.style.transform === 'rotateY(180deg)' && !this.stream.outboundStreamOpts.publisherProperties.mirror) {
                 // If the video was already rotated and now is set to not mirror
                 this.removeMirrorVideo(video);
-            } else if (this.stream.outboundStreamOpts.publisherProperties.mirror) {
+            } else if (this.stream.outboundStreamOpts.publisherProperties.mirror && !this.stream.isSendScreen()) {
                 this.mirrorVideo(video);
             }
         }
@@ -378,8 +388,9 @@ export class StreamManager implements EventDispatcher {
         }
 
         this.videos.forEach(streamManagerVideo => {
-            // Remove oncanplay event listener (only OpenVidu browser one, not the user ones)
+            // Remove oncanplay event listener (only OpenVidu browser listener, not the user ones)
             streamManagerVideo.video.removeEventListener('canplay', this.canPlayListener);
+            streamManagerVideo.canplayListenerAdded = false;
             if (!!streamManagerVideo.targetElement) {
                 // Only remove from DOM videos created by OpenVidu Browser (those generated by passing a valid targetElement in OpenVidu.initPublisher
                 // and Session.subscribe or those created by StreamManager.createVideoElement). All this videos triggered a videoElementCreated event
@@ -400,6 +411,7 @@ export class StreamManager implements EventDispatcher {
         let disassociated = false;
         for (let i = 0; i < this.videos.length; i++) {
             if (this.videos[i].video === video) {
+                this.videos[i].video.removeEventListener('canplay', this.canPlayListener);
                 this.videos.splice(i, 1);
                 disassociated = true;
                 console.info('Video element disassociated from ', this);
@@ -413,8 +425,9 @@ export class StreamManager implements EventDispatcher {
      * @hidden
      */
     addPlayEventToFirstVideo() {
-        if ((!!this.videos[0]) && (!!this.videos[0].video) && (this.videos[0].video.oncanplay === null)) {
+        if ((!!this.videos[0]) && (!!this.videos[0].video) && (!this.videos[0].canplayListenerAdded)) {
             this.videos[0].video.addEventListener('canplay', this.canPlayListener);
+            this.videos[0].canplayListenerAdded = true;
         }
     }
 

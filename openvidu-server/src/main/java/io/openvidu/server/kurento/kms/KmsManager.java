@@ -18,108 +18,183 @@
 package io.openvidu.server.kurento.kms;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.concurrent.ConcurrentHashMap;
 
-import org.kurento.client.KurentoClient;
+import javax.annotation.PostConstruct;
+
+import org.kurento.client.KurentoConnectionListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 
-import io.openvidu.client.OpenViduException;
-import io.openvidu.client.OpenViduException.Code;
-import io.openvidu.server.kurento.KurentoClientProvider;
-import io.openvidu.server.kurento.KurentoClientSessionInfo;
-import io.openvidu.server.kurento.OpenViduKurentoClientSessionInfo;
+import com.google.gson.JsonObject;
 
-public abstract class KmsManager implements KurentoClientProvider {
+import io.openvidu.server.config.OpenviduConfig;
 
-  public static class KmsLoad implements Comparable<KmsLoad> {
+public abstract class KmsManager {
 
-    private Kms kms;
-    private double load;
+	public class KmsLoad implements Comparable<KmsLoad> {
 
-    public KmsLoad(Kms kms, double load) {
-      this.kms = kms;
-      this.load = load;
-    }
+		private Kms kms;
+		private double load;
 
-    public Kms getKms() {
-      return kms;
-    }
+		public KmsLoad(Kms kms, double load) {
+			this.kms = kms;
+			this.load = load;
+		}
 
-    public double getLoad() {
-      return load;
-    }
+		public Kms getKms() {
+			return kms;
+		}
 
-    @Override
-    public int compareTo(KmsLoad o) {
-      return Double.compare(this.load, o.load);
-    }
-  }
+		public double getLoad() {
+			return load;
+		}
 
-  private final Logger log = LoggerFactory.getLogger(KmsManager.class);
+		@Override
+		public int compareTo(KmsLoad o) {
+			return Double.compare(this.load, o.load);
+		}
 
-  private List<Kms> kmss = new ArrayList<Kms>();
-  private Iterator<Kms> usageIterator = null;
+		public JsonObject toJson() {
+			JsonObject json = this.kms.toJson();
+			json.addProperty("load", this.load);
+			return json;
+		}
 
-  @Override
-  public KurentoClient getKurentoClient(KurentoClientSessionInfo sessionInfo) throws OpenViduException {
-    if (!(sessionInfo instanceof OpenViduKurentoClientSessionInfo)) {
-      throw new OpenViduException(Code.GENERIC_ERROR_CODE, "Unkown session info bean type (expected "
-          + OpenViduKurentoClientSessionInfo.class.getName() + ")");
-    }
-    return getKms((OpenViduKurentoClientSessionInfo) sessionInfo).getKurentoClient();
-  }
+		public JsonObject toJsonExtended(boolean withSessions, boolean withExtraInfo) {
+			JsonObject json = this.kms.toJsonExtended(withSessions, withExtraInfo);
+			json.addProperty("load", this.load);
+			return json;
+		}
 
-  /**
-   * Returns a {@link Kms} using a round-robin strategy.
-   *
-   * @param sessionInfo
-   *          session's id
-   */
-  public synchronized Kms getKms(OpenViduKurentoClientSessionInfo sessionInfo) {
-    if (usageIterator == null || !usageIterator.hasNext()) {
-      usageIterator = kmss.iterator();
-    }
-    return usageIterator.next();
-  }
+	}
 
-  public synchronized void addKms(Kms kms) {
-    this.kmss.add(kms);
-  }
+	protected static final Logger log = LoggerFactory.getLogger(KmsManager.class);
 
-  public synchronized Kms getLessLoadedKms() {
-    return Collections.min(getKmsLoads()).kms;
-  }
+	@Autowired
+	protected OpenviduConfig openviduConfig;
 
-  public synchronized Kms getNextLessLoadedKms() {
-    List<KmsLoad> sortedLoads = getKmssSortedByLoad();
-    if (sortedLoads.size() > 1) {
-      return sortedLoads.get(1).kms;
-    } else {
-      return sortedLoads.get(0).kms;
-    }
-  }
+	@Autowired
+	protected LoadManager loadManager;
 
-  public synchronized List<KmsLoad> getKmssSortedByLoad() {
-    List<KmsLoad> kmsLoads = getKmsLoads();
-    Collections.sort(kmsLoads);
-    return kmsLoads;
-  }
+	final protected Map<String, Kms> kmss = new ConcurrentHashMap<>();
 
-  private List<KmsLoad> getKmsLoads() {
-    ArrayList<KmsLoad> kmsLoads = new ArrayList<>();
-    for (Kms kms : kmss) {
-      double load = kms.getLoad();
-      kmsLoads.add(new KmsLoad(kms, load));
-      log.trace("Calc load {} for kms: {}", load, kms.getUri());
-    }
-    return kmsLoads;
-  }
+	public synchronized void addKms(Kms kms) {
+		this.kmss.put(kms.getId(), kms);
+	}
 
-  @Override
-  public boolean destroyWhenUnused() {
-    return false;
-  }
+	public synchronized Kms removeKms(String kmsId) {
+		return this.kmss.remove(kmsId);
+	}
+
+	public synchronized Kms getLessLoadedKms() throws NoSuchElementException {
+		return Collections.min(getKmsLoads()).kms;
+	}
+
+	public Kms getKms(String kmsId) {
+		return this.kmss.get(kmsId);
+	}
+
+	public boolean kmsWithUriExists(String kmsUri) {
+		return this.kmss.values().stream().anyMatch(kms -> kms.getUri().equals(kmsUri));
+	}
+
+	public KmsLoad getKmsLoad(String kmsId) {
+		Kms kms = this.kmss.get(kmsId);
+		return new KmsLoad(kms, kms.getLoad());
+	}
+
+	public Collection<Kms> getKmss() {
+		return this.kmss.values();
+	}
+
+	public synchronized List<KmsLoad> getKmssSortedByLoad() {
+		List<KmsLoad> kmsLoads = getKmsLoads();
+		Collections.sort(kmsLoads);
+		return kmsLoads;
+	}
+
+	private List<KmsLoad> getKmsLoads() {
+		ArrayList<KmsLoad> kmsLoads = new ArrayList<>();
+		for (Kms kms : kmss.values()) {
+			double load = kms.getLoad();
+			kmsLoads.add(new KmsLoad(kms, load));
+			log.trace("Calc load {} for kms {}", load, kms.getUri());
+		}
+		return kmsLoads;
+	}
+
+	public boolean destroyWhenUnused() {
+		return false;
+	}
+
+	protected KurentoConnectionListener generateKurentoConnectionListener(String kmsId) {
+		return new KurentoConnectionListener() {
+
+			@Override
+			public void reconnected(boolean sameServer) {
+				final Kms kms = kmss.get(kmsId);
+				kms.setKurentoClientConnected(true);
+				kms.setTimeOfKurentoClientConnection(System.currentTimeMillis());
+				if (!sameServer) {
+					// Different KMS. Reset sessions status (no Publisher or SUbscriber endpoints)
+					log.warn("Kurento Client reconnected to a different KMS instance, with uri {}", kms.getUri());
+					log.warn("Updating all webrtc endpoints for active sessions");
+					final long timeOfKurentoDisconnection = kms.getTimeOfKurentoClientDisconnection();
+					kms.getKurentoSessions().forEach(kSession -> {
+						kSession.restartStatusInKurento(timeOfKurentoDisconnection);
+					});
+				} else {
+					// Same KMS. We may infer that openvidu-server/KMS connection has been lost, but
+					// not the clients/KMS connections
+					log.warn("Kurento Client reconnected to same KMS {} with uri {}", kmsId, kms.getUri());
+				}
+				kms.setTimeOfKurentoClientDisconnection(0);
+			}
+
+			@Override
+			public void disconnected() {
+				final Kms kms = kmss.get(kmsId);
+				kms.setKurentoClientConnected(false);
+				kms.setTimeOfKurentoClientDisconnection(System.currentTimeMillis());
+				log.warn("Kurento Client disconnected from KMS {} with uri {}", kmsId, kms.getUri());
+			}
+
+			@Override
+			public void connectionFailed() {
+				final Kms kms = kmss.get(kmsId);
+				kms.setKurentoClientConnected(false);
+				log.warn("Kurento Client failed connecting to KMS {} with uri {}", kmsId, kms.getUri());
+			}
+
+			@Override
+			public void connected() {
+				final Kms kms = kmss.get(kmsId);
+				kms.setKurentoClientConnected(true);
+				kms.setTimeOfKurentoClientConnection(System.currentTimeMillis());
+				log.warn("Kurento Client is now connected to KMS {} with uri {}", kmsId, kms.getUri());
+			}
+		};
+	}
+
+	public abstract List<Kms> initializeKurentoClients(List<String> kmsUris, boolean disconnectUponFailure)
+			throws Exception;
+
+	@PostConstruct
+	private void postConstruct() {
+		try {
+			this.initializeKurentoClients(this.openviduConfig.getKmsUris(), true);
+		} catch (Exception e) {
+			// Some KMS wasn't reachable
+			log.error("Shutting down OpenVidu Server");
+			System.exit(1);
+		}
+	}
+
 }

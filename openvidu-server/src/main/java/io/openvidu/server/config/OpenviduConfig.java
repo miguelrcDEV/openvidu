@@ -17,18 +17,50 @@
 
 package io.openvidu.server.config;
 
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+
+import javax.annotation.PostConstruct;
+
+import org.apache.http.Header;
+import org.apache.http.message.BasicHeader;
+import org.kurento.jsonrpc.JsonUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.support.PropertiesLoaderUtils;
 import org.springframework.stereotype.Component;
 
-import io.openvidu.server.core.ParticipantRole;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+
+import io.openvidu.java.client.OpenViduRole;
+import io.openvidu.server.cdr.CDREventName;
 
 @Component
 public class OpenviduConfig {
 
+	private static final Logger log = LoggerFactory.getLogger(OpenviduConfig.class);
+
+	@Value("#{'${spring.config.additional-location:}'.length() > 0 ? '${spring.config.additional-location:}' : \"\"}")
+	private String springConfigLocation;
+
 	@Autowired
 	BuildProperties buildProperties;
+
+	@Value("${kms.uris}")
+	private String kmsUris;
 
 	@Value("${openvidu.publicurl}")
 	private String openviduPublicUrl; // local, docker, [FINAL_URL]
@@ -41,6 +73,9 @@ public class OpenviduConfig {
 
 	@Value("${openvidu.cdr}")
 	private boolean openviduCdr;
+
+	@Value("${openvidu.cdr.path}")
+	private String openviduCdrPath;
 
 	@Value("${openvidu.recording}")
 	private boolean openviduRecording;
@@ -62,6 +97,21 @@ public class OpenviduConfig {
 
 	@Value("${openvidu.recording.autostop-timeout}")
 	private int openviduRecordingAutostopTimeout;
+
+	@Value("${openvidu.recording.composed-url}")
+	private String openviduRecordingComposedUrl;
+
+	@Value("${openvidu.webhook}")
+	private boolean openviduWebhook;
+
+	@Value("${openvidu.webhook.endpoint}")
+	private String openviduWebhookEndpoint;
+
+	@Value("${openvidu.webhook.headers}")
+	private String openviduWebhookHeaders;
+
+	@Value("${openvidu.webhook.events}")
+	private String openviduWebhookEvents;
 
 	@Value("${openvidu.streams.video.max-recv-bandwidth}")
 	private int openviduStreamsVideoMaxRecvBandwidth;
@@ -87,13 +137,82 @@ public class OpenviduConfig {
 	@Value("${coturn.redis.connect-timeout}")
 	private String coturnRedisConnectTimeout;
 
-	@Value("${kms.stats-enabled}")
-	private boolean kmsStatsEnabled;
-
 	@Value("#{'${spring.profiles.active:}'.length() > 0 ? '${spring.profiles.active:}'.split(',') : \"default\"}")
 	private String springProfile;
 
 	private String finalUrl;
+	private List<String> kmsUrisList;
+	private List<Header> webhookHeadersList;
+	private List<CDREventName> webhookEventsList;
+	private Properties externalizedProperties;
+
+	@PostConstruct
+	public void init() {
+
+		if (!this.springConfigLocation.isEmpty()) {
+			// Properties file has been manually configured in certain path
+			FileSystemResource resource = new FileSystemResource(this.springConfigLocation);
+			try {
+				this.externalizedProperties = PropertiesLoaderUtils.loadProperties(resource);
+				log.info("Properties file found at \"{}\". Content: {}", this.springConfigLocation,
+						externalizedProperties);
+			} catch (IOException e) {
+				log.error("Error in 'spring.config.additional-location' system property: {}", e.getMessage());
+				log.error("Shutting down OpenVidu Server");
+				System.exit(1);
+			}
+			// Check OpenVidu Server write permissions in properties path
+			if (!Files.isWritable(Paths.get(this.springConfigLocation))) {
+				log.warn(
+						"The properties path '{}' set with property 'spring.config.additional-location' is not valid. Reason: OpenVidu Server needs write permissions. Try running command \"sudo chmod 777 {}\". If not, OpenVidu won't be able to overwrite preexisting properties on reboot",
+						this.springConfigLocation, this.springConfigLocation);
+			} else {
+				log.info("OpenVidu Server has write permissions on properties path: {}", this.springConfigLocation);
+			}
+		}
+
+		try {
+			this.initiateKmsUris(this.kmsUris);
+		} catch (Exception e) {
+			log.error("Error in 'kms.uris' system property: " + e.getMessage());
+			log.error("Shutting down OpenVidu Server");
+			System.exit(1);
+		}
+		if (this.isWebhookEnabled()) {
+			log.info("OpenVidu Webhook service enabled");
+			try {
+				if (this.openviduWebhookEndpoint == null || this.openviduWebhookEndpoint.isEmpty()) {
+					log.error(
+							"If OpenVidu Webhook service is enabled property 'openvidu.webhook.endpoint' must be defined");
+					log.error("Shutting down OpenVidu Server");
+					System.exit(1);
+				}
+				this.initiateOpenViduWebhookEndpoint(this.openviduWebhookEndpoint);
+			} catch (Exception e) {
+				log.error("Error in 'openvidu.webhook.endpoint' system property. " + e.getMessage());
+				log.error("Shutting down OpenVidu Server");
+				System.exit(1);
+			}
+			try {
+				this.initiateOpenViduWebhookHeaders(this.openviduWebhookHeaders);
+			} catch (Exception e) {
+				log.error("Error in 'openvidu.webhook.headers' system property: " + e.getMessage());
+				log.error("Shutting down OpenVidu Server");
+				System.exit(1);
+			}
+			try {
+				this.initiateOpenViduWebhookEvents(this.openviduWebhookEvents);
+			} catch (Exception e) {
+				log.error("Error in 'openvidu.webhook.events' system property: " + e.getMessage());
+				log.error("Shutting down OpenVidu Server");
+				System.exit(1);
+			}
+		}
+	}
+
+	public List<String> getKmsUris() {
+		return this.kmsUrisList;
+	}
 
 	public String getOpenViduPublicUrl() {
 		return this.openviduPublicUrl;
@@ -113,6 +232,10 @@ public class OpenviduConfig {
 
 	public boolean isCdrEnabled() {
 		return this.openviduCdr;
+	}
+
+	public String getOpenviduCdrPath() {
+		return this.openviduCdrPath;
 	}
 
 	public boolean isRecordingModuleEnabled() {
@@ -192,42 +315,158 @@ public class OpenviduConfig {
 		return this.coturnRedisDbname;
 	}
 
-	public boolean isKmsStatsEnabled() {
-		return this.kmsStatsEnabled;
-	}
-
 	public String getOpenViduRecordingNotification() {
 		return this.openviduRecordingNotification;
 	}
 
-	public ParticipantRole[] getRolesFromRecordingNotification() {
-		ParticipantRole[] roles;
+	public String getOpenViduRecordingComposedUrl() {
+		return this.openviduRecordingComposedUrl;
+	}
+
+	public boolean isWebhookEnabled() {
+		return this.openviduWebhook;
+	}
+
+	public String getOpenViduWebhookEndpoint() {
+		return this.openviduWebhookEndpoint;
+	}
+
+	public List<Header> getOpenViduWebhookHeaders() {
+		return this.webhookHeadersList;
+	}
+
+	public List<CDREventName> getOpenViduWebhookEvents() {
+		return this.webhookEventsList;
+	}
+
+	public OpenViduRole[] getRolesFromRecordingNotification() {
+		OpenViduRole[] roles;
 		switch (this.openviduRecordingNotification) {
 		case "none":
-			roles = new ParticipantRole[0];
+			roles = new OpenViduRole[0];
 			break;
 		case "moderator":
-			roles = new ParticipantRole[] { ParticipantRole.MODERATOR };
+			roles = new OpenViduRole[] { OpenViduRole.MODERATOR };
 			break;
 		case "publisher_moderator":
-			roles = new ParticipantRole[] { ParticipantRole.PUBLISHER, ParticipantRole.MODERATOR };
+			roles = new OpenViduRole[] { OpenViduRole.PUBLISHER, OpenViduRole.MODERATOR };
 			break;
 		case "all":
-			roles = new ParticipantRole[] { ParticipantRole.SUBSCRIBER, ParticipantRole.PUBLISHER,
-					ParticipantRole.MODERATOR };
+			roles = new OpenViduRole[] { OpenViduRole.SUBSCRIBER, OpenViduRole.PUBLISHER, OpenViduRole.MODERATOR };
 			break;
 		default:
-			roles = new ParticipantRole[] { ParticipantRole.PUBLISHER, ParticipantRole.MODERATOR };
+			roles = new OpenViduRole[] { OpenViduRole.PUBLISHER, OpenViduRole.MODERATOR };
 		}
 		return roles;
 	}
 
 	public String getOpenViduServerVersion() {
-		return this.buildProperties.get("version.openvidu.server");
+		String v = this.buildProperties.get("version.openvidu.server");
+		if (v == null) {
+			v = this.getVersion();
+		}
+		return v;
 	}
 
 	public String getVersion() {
 		return this.buildProperties.getVersion();
+	}
+
+	public String getSpringConfigLocation() {
+		return this.springConfigLocation;
+	}
+
+	public boolean hasExternalizedProperties() {
+		return !this.springConfigLocation.isEmpty();
+	}
+
+	public Properties getExternalizedProperties() {
+		return this.externalizedProperties;
+	}
+
+	private void initiateKmsUris(String kmsUris) throws Exception {
+		kmsUris = kmsUris.replaceAll("\\s", ""); // Remove all white spaces
+		kmsUris = kmsUris.replaceAll("\\\\", ""); // Remove previous escapes
+		kmsUris = kmsUris.replaceAll("\"", ""); // Remove previous double quotes
+		kmsUris = kmsUris.replaceFirst("^\\[", "[\\\""); // Escape first char
+		kmsUris = kmsUris.replaceFirst("\\]$", "\\\"]"); // Escape last char
+		kmsUris = kmsUris.replaceAll(",", "\\\",\\\""); // Escape middle uris
+		Gson gson = new Gson();
+		JsonArray kmsUrisArray = gson.fromJson(kmsUris, JsonArray.class);
+		this.kmsUrisList = JsonUtils.toStringList(kmsUrisArray);
+		if (kmsUrisList.size() == 1 && kmsUrisList.get(0).isEmpty()) {
+			log.warn("Array kms.uris is empty");
+			this.kmsUrisList = new ArrayList<>();
+		} else {
+			for (String uri : kmsUrisList) {
+				this.checkWebsocketUri(uri);
+			}
+		}
+	}
+
+	public void initiateOpenViduWebhookEndpoint(String endpoint) throws Exception {
+		try {
+			new URL(endpoint);
+			log.info("OpenVidu Webhook endpoint is {}", endpoint);
+		} catch (MalformedURLException e) {
+			throw new Exception("Webhook endpoint '" + endpoint + "' is not correct. Malformed URL: " + e.getMessage());
+		}
+	}
+
+	public void initiateOpenViduWebhookHeaders(String headers) throws Exception {
+		JsonParser parser = new JsonParser();
+		JsonElement elem = parser.parse(headers);
+		JsonArray headersJsonArray = elem.getAsJsonArray();
+		this.webhookHeadersList = new ArrayList<>();
+
+		for (JsonElement jsonElement : headersJsonArray) {
+			String headerString = jsonElement.getAsString();
+			String[] headerSplit = headerString.split(": ", 2);
+			if (headerSplit.length != 2) {
+				throw new Exception("HTTP header '" + headerString
+						+ "' syntax is not correct. Must be 'HEADER_NAME: HEADER_VALUE'. For example: 'Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l'");
+			}
+			String headerName = headerSplit[0];
+			String headerValue = headerSplit[1];
+			if (headerName.isEmpty()) {
+				throw new Exception(
+						"HTTP header '" + headerString + "' syntax is not correct. Header name cannot be empty");
+			}
+			if (headerValue.isEmpty()) {
+				throw new Exception(
+						"HTTP header '" + headerString + "' syntax is not correct. Header value cannot be empty");
+			}
+			this.webhookHeadersList.add(new BasicHeader(headerName, headerValue));
+		}
+		log.info("OpenVidu Webhook headers: {}", this.getOpenViduWebhookHeaders().toString());
+	}
+
+	public void initiateOpenViduWebhookEvents(String events) throws Exception {
+		JsonParser parser = new JsonParser();
+		JsonElement elem = parser.parse(events);
+		JsonArray eventsJsonArray = elem.getAsJsonArray();
+		this.webhookEventsList = new ArrayList<>();
+
+		for (JsonElement jsonElement : eventsJsonArray) {
+			String eventString = jsonElement.getAsString();
+			try {
+				CDREventName.valueOf(eventString);
+			} catch (IllegalArgumentException e) {
+				throw new Exception("Event name '" + eventString + "' does not exist");
+			}
+			this.webhookEventsList.add(CDREventName.valueOf(eventString));
+		}
+		log.info("OpenVidu Webhook events: {}", this.getOpenViduWebhookEvents().toString());
+	}
+
+	public void checkWebsocketUri(String uri) throws MalformedURLException {
+		try {
+			String parsedUri = uri.replaceAll("^ws://", "http://").replaceAll("^wss://", "https://");
+			new URL(parsedUri);
+		} catch (MalformedURLException e) {
+			log.error("URI {} is not a valid WebSocket endpoint", uri);
+			throw e;
+		}
 	}
 
 }

@@ -19,6 +19,7 @@ package io.openvidu.server.cdr;
 
 import com.google.gson.JsonObject;
 
+import io.openvidu.server.core.EndReason;
 import io.openvidu.server.core.Participant;
 
 public class CDREventParticipant extends CDREventEnd {
@@ -32,18 +33,23 @@ public class CDREventParticipant extends CDREventEnd {
 	}
 
 	// participantLeft
-	public CDREventParticipant(CDREvent event, String reason) {
-		super(CDREventName.participantLeft, event.getSessionId(), event.getTimestamp(), reason);
-		this.participant = ((CDREventParticipant) event).participant;
+	public CDREventParticipant(CDREventParticipant event, EndReason reason, Long timestamp) {
+		super(CDREventName.participantLeft, event.getSessionId(), event.getTimestamp(), reason, timestamp);
+		this.participant = event.participant;
 	}
 
 	@Override
 	public JsonObject toJson() {
 		JsonObject json = super.toJson();
 		json.addProperty("participantId", this.participant.getParticipantPublicId());
-		json.addProperty("location", this.participant.getLocation());
+		json.addProperty("location",
+				this.participant.getLocation() != null ? this.participant.getLocation().toString() : "unknown");
 		json.addProperty("platform", this.participant.getPlatform());
 		return json;
+	}
+
+	public Participant getParticipant() {
+		return this.participant;
 	}
 
 }
